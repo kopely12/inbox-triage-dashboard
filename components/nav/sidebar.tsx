@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useSession } from 'next-auth/react';
+import { useSession, signOut } from 'next-auth/react';
 import { cn } from '@/lib/utils';
 import {
   User,
@@ -12,6 +12,7 @@ import {
   Mail,
   ChevronRight,
   BarChart2,
+  LogOut,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -74,13 +75,22 @@ export function Sidebar() {
             <AvatarImage src={session?.user?.image ?? ''} />
             <AvatarFallback className="text-xs">{initials}</AvatarFallback>
           </Avatar>
-          <div className="flex flex-col min-w-0">
+          <div className="flex flex-col min-w-0 flex-1">
             <span className="text-xs font-medium truncate">{name}</span>
             <span className="text-[11px] text-muted-foreground truncate">{session?.user?.email}</span>
           </div>
-          <Badge variant={plan === 'pro' ? 'default' : 'secondary'} className="ml-auto text-[10px] shrink-0">
-            {plan}
-          </Badge>
+          <div className="flex items-center gap-1 shrink-0">
+            <Badge variant={plan === 'pro' ? 'default' : 'secondary'} className="text-[10px]">
+              {plan}
+            </Badge>
+            <button
+              onClick={() => signOut({ callbackUrl: '/login' })}
+              title="Sign out"
+              className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
     </aside>
