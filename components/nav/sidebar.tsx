@@ -19,7 +19,7 @@ const NAV_ITEMS = [
   { href: '/account',  label: 'Account',  icon: User,       adminOnly: false },
   { href: '/billing',  label: 'Billing',  icon: CreditCard,  adminOnly: false },
   { href: '/team',     label: 'Team',     icon: Users,       adminOnly: true  },
-  { href: '/settings', label: 'Settings', icon: Settings,    adminOnly: true  },
+  { href: '/settings', label: 'Settings', icon: Settings,    adminOnly: false },
 ];
 
 export function Sidebar() {
