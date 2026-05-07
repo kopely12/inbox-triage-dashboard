@@ -1,4 +1,5 @@
 import { auth } from '@/auth';
+import { redirect } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -6,6 +7,8 @@ import { UserPlus } from 'lucide-react';
 
 export default async function TeamPage() {
   const session = await auth();
+  const role = session?.user?.orgRole;
+  if (role !== 'admin' && role !== 'owner') redirect('/account');
 
   return (
     <div className="max-w-3xl space-y-6">

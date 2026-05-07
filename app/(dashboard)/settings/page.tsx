@@ -1,6 +1,11 @@
+import { auth } from '@/auth';
+import { redirect } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const session = await auth();
+  const role = session?.user?.orgRole;
+  if (role !== 'admin' && role !== 'owner') redirect('/account');
   return (
     <div className="max-w-2xl space-y-6">
       <div>
