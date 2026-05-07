@@ -57,7 +57,7 @@ export function InviteModal() {
           <DialogHeader>
             <DialogTitle>Invite a team member</DialogTitle>
             <DialogDescription>
-              They'll receive a link to join your organisation.
+              They'll receive a link to join your organization.
             </DialogDescription>
           </DialogHeader>
 

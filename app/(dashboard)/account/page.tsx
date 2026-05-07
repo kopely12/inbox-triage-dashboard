@@ -4,59 +4,31 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
+import { Button } from '@/components/ui/button';
 import { EditName } from '@/components/account/edit-name';
-import { Mail, Inbox, CheckSquare, Clock } from 'lucide-react';
+import { PreferencesForm } from '@/components/settings/preferences-form';
+import { OrgNameForm } from '@/components/settings/org-name-form';
+import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog';
+import { Download } from 'lucide-react';
+import Link from 'next/link';
 
 export default async function AccountPage() {
   const session = await auth();
   const userId  = session!.user.id;
+  const role    = session!.user.orgRole;
+  const isAdmin = role === 'admin' || role === 'owner';
 
-  // Fetch user record and usage stats in parallel
-  const monthStart = new Date();
-  monthStart.setDate(1);
-  monthStart.setHours(0, 0, 0, 0);
-  const monthStartISO = monthStart.toISOString();
-
-  const [
-    { data: user },
-    { data: sessions },
-    { data: openCommitments },
-    { data: resolvedCommitments },
-    { data: lastTriage },
-  ] = await Promise.all([
+  const [{ data: user }, { data: membership }] = await Promise.all([
     supabaseAdmin.from('users').select('*').eq('id', userId).single(),
 
-    // Triage sessions this month
-    supabaseAdmin
-      .from('triage_sessions')
-      .select('emails_scanned, emails_surfaced')
-      .eq('user_id', userId)
-      .gte('triggered_at', monthStartISO),
-
-    // Open commitments
-    supabaseAdmin
-      .from('commitments')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId)
-      .eq('status', 'open')
-      .eq('direction', 'outgoing'),
-
-    // Commitments resolved this month
-    supabaseAdmin
-      .from('commitments')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId)
-      .eq('status', 'done')
-      .gte('resolved_at', monthStartISO),
-
-    // Most recent triage session
-    supabaseAdmin
-      .from('triage_sessions')
-      .select('triggered_at')
-      .eq('user_id', userId)
-      .order('triggered_at', { ascending: false })
-      .limit(1)
-      .single(),
+    isAdmin
+      ? supabaseAdmin
+          .from('org_members')
+          .select('org_id, organizations(name)')
+          .eq('user_id', userId)
+          .eq('status', 'active')
+          .single()
+      : Promise.resolve({ data: null }),
   ]);
 
   const name     = user?.name ?? session!.user.name ?? '—';
@@ -67,58 +39,18 @@ export default async function AccountPage() {
     ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
     : '—';
 
-  const sessionCount    = sessions?.length ?? 0;
-  const emailsScanned   = sessions?.reduce((s, r) => s + (r.emails_scanned  ?? 0), 0) ?? 0;
-  const emailsSurfaced  = sessions?.reduce((s, r) => s + (r.emails_surfaced ?? 0), 0) ?? 0;
-  const openCount       = (openCommitments as unknown as { count: number } | null)?.count
-                          ?? openCommitments?.length ?? 0;
-  const resolvedCount   = (resolvedCommitments as unknown as { count: number } | null)?.count
-                          ?? resolvedCommitments?.length ?? 0;
-
-  const lastTriageDate = lastTriage?.triggered_at
-    ? new Date(lastTriage.triggered_at).toLocaleDateString('en-US', {
-        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-      })
-    : 'Never';
-
-  const monthName = monthStart.toLocaleString('en-US', { month: 'long' });
-
-  const stats = [
-    {
-      label: 'Triages in ' + monthName,
-      value: sessionCount,
-      sub:   `${emailsScanned.toLocaleString()} emails scanned`,
-      icon:  Inbox,
-    },
-    {
-      label: 'Emails surfaced',
-      value: emailsSurfaced.toLocaleString(),
-      sub:   'prioritised this month',
-      icon:  Mail,
-    },
-    {
-      label: 'Commitments resolved',
-      value: resolvedCount,
-      sub:   `${openCount} still open`,
-      icon:  CheckSquare,
-    },
-    {
-      label: 'Last triage',
-      value: lastTriageDate,
-      sub:   null,
-      icon:  Clock,
-      wide:  true,
-    },
-  ];
+  const timezone           = user?.timezone            ?? 'UTC';
+  const defaultSnoozeHours = user?.default_snooze_hours ?? 24;
+  const orgName            = (membership?.organizations as any)?.name ?? '';
 
   return (
     <div className="max-w-2xl space-y-6">
       <div>
         <h2 className="text-lg font-semibold">Account</h2>
-        <p className="text-sm text-muted-foreground">Your profile and usage.</p>
+        <p className="text-sm text-muted-foreground">Your profile, preferences, and account settings.</p>
       </div>
 
-      {/* Profile card */}
+      {/* Profile */}
       <Card>
         <CardHeader className="pb-4">
           <CardTitle className="text-sm font-medium">Profile</CardTitle>
@@ -138,9 +70,9 @@ export default async function AccountPage() {
 
           <Separator />
 
-          <dl className="grid grid-cols-2 gap-3 text-sm">
+          <dl className="grid grid-cols-3 gap-3 text-sm">
             <div>
-              <dt className="text-muted-foreground">Plan</dt>
+              <dt className="text-xs text-muted-foreground">Plan</dt>
               <dd className="mt-0.5">
                 <Badge variant={plan === 'pro' ? 'default' : 'secondary'} className="capitalize">
                   {plan}
@@ -148,41 +80,75 @@ export default async function AccountPage() {
               </dd>
             </div>
             <div>
-              <dt className="text-muted-foreground">Member since</dt>
-              <dd className="mt-0.5 font-medium">{joined}</dd>
+              <dt className="text-xs text-muted-foreground">Member since</dt>
+              <dd className="mt-0.5 font-medium text-sm">{joined}</dd>
             </div>
             <div>
-              <dt className="text-muted-foreground">Role</dt>
-              <dd className="mt-0.5 font-medium capitalize">{user?.org_role ?? 'member'}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Google ID</dt>
-              <dd className="mt-0.5 font-mono text-xs text-muted-foreground truncate">{user?.google_id ?? '—'}</dd>
+              <dt className="text-xs text-muted-foreground">Role</dt>
+              <dd className="mt-0.5 font-medium text-sm capitalize">{user?.org_role ?? 'member'}</dd>
             </div>
           </dl>
         </CardContent>
       </Card>
 
-      {/* Usage stats */}
+      {/* Preferences */}
       <Card>
         <CardHeader className="pb-4">
-          <CardTitle className="text-sm font-medium">Usage</CardTitle>
-          <CardDescription>Activity from your Chrome extension this month.</CardDescription>
+          <CardTitle className="text-sm font-medium">Preferences</CardTitle>
+          <CardDescription>Controls how the extension schedules reminders and pre-fills snooze times.</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 gap-4">
-            {stats.map(({ label, value, sub, icon: Icon }) => (
-              <div key={label} className="flex items-start gap-3 p-3 rounded-lg bg-muted/40">
-                <div className="flex items-center justify-center w-8 h-8 rounded-md bg-background border border-border shrink-0">
-                  <Icon className="w-4 h-4 text-muted-foreground" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">{label}</p>
-                  <p className="font-semibold text-sm mt-0.5 truncate">{value}</p>
-                  {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
-                </div>
-              </div>
-            ))}
+          <PreferencesForm timezone={timezone} defaultSnoozeHours={defaultSnoozeHours} />
+        </CardContent>
+      </Card>
+
+      {/* Organization — admin/owner only */}
+      {isAdmin && (
+        <Card>
+          <CardHeader className="pb-4">
+            <CardTitle className="text-sm font-medium">Organization</CardTitle>
+            <CardDescription>Visible to all members of your team.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <OrgNameForm currentName={orgName} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Danger zone */}
+      <Card className="border-destructive/40">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-sm font-medium text-destructive">Danger zone</CardTitle>
+          <CardDescription>Irreversible actions. Please proceed carefully.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium">Download my data</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Export your profile, triage sessions, and commitments as JSON.
+              </p>
+            </div>
+            <Button asChild variant="outline" size="sm" className="shrink-0 gap-1.5">
+              <Link href="/api/account/download" target="_blank">
+                <Download className="w-3.5 h-3.5" />
+                Download
+              </Link>
+            </Button>
+          </div>
+
+          <Separator />
+
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium">Delete account</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Permanently remove your account and all associated data.
+              </p>
+            </div>
+            <div className="shrink-0">
+              <DeleteAccountDialog />
+            </div>
           </div>
         </CardContent>
       </Card>

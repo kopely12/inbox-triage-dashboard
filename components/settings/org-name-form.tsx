@@ -29,7 +29,7 @@ export function OrgNameForm({ currentName }: { currentName: string }) {
   return (
     <form action={submit} className="space-y-4">
       <div className="space-y-1.5 max-w-sm">
-        <Label htmlFor="name">Organisation name</Label>
+        <Label htmlFor="name">Organization name</Label>
         <Input
           id="name"
           name="name"

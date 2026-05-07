@@ -34,7 +34,7 @@ export async function updatePreferences(formData: FormData) {
     .eq('id', session.user.id);
 
   if (error) return { error: 'Failed to save preferences.' };
-  revalidatePath('/settings');
+  revalidatePath('/account');
   return { success: true };
 }
 
@@ -56,15 +56,15 @@ export async function updateOrgName(formData: FormData) {
     .eq('status', 'active')
     .single();
 
-  if (!membership?.org_id) return { error: 'No organisation found.' };
+  if (!membership?.org_id) return { error: 'No organization found.' };
 
   const { error } = await supabaseAdmin
     .from('organizations')
     .update({ name })
     .eq('id', membership.org_id);
 
-  if (error) return { error: 'Failed to update organisation name.' };
-  revalidatePath('/settings');
+  if (error) return { error: 'Failed to update organization name.' };
+  revalidatePath('/account');
   revalidatePath('/team');
   return { success: true };
 }

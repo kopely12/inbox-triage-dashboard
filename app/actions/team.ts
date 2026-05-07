@@ -31,7 +31,7 @@ export async function inviteMember(formData: FormData) {
     session.user.email ?? '',
     session.user.orgRole,
   );
-  if (!orgId) return { error: 'No organisation found.' };
+  if (!orgId) return { error: 'No organization found.' };
 
   // Check if a user with this email is already an active member
   const { data: existingUser } = await supabaseAdmin

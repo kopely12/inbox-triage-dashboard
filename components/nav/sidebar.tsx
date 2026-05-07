@@ -8,7 +8,6 @@ import {
   User,
   CreditCard,
   Users,
-  Settings,
   Mail,
   ChevronRight,
   BarChart2,
@@ -22,7 +21,6 @@ const NAV_ITEMS = [
   { href: '/analytics', label: 'Analytics', icon: BarChart2,  adminOnly: false },
   { href: '/billing',   label: 'Billing',   icon: CreditCard, adminOnly: false },
   { href: '/team',      label: 'Team',      icon: Users,      adminOnly: true  },
-  { href: '/settings',  label: 'Settings',  icon: Settings,   adminOnly: false },
 ];
 
 export function Sidebar() {
