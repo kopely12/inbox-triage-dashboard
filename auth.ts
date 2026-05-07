@@ -3,6 +3,9 @@ import Google from 'next-auth/providers/google';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  // Vercel auto-sets VERCEL_URL; fall back to NEXTAUTH_URL for local dev
+  ...(process.env.NEXTAUTH_URL && { trustHost: true }),
+
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID!,

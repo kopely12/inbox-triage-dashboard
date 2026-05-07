@@ -1,35 +1,34 @@
 import { auth } from '@/auth';
 import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
 
 const ADMIN_PATHS = ['/team', '/settings'];
+const PUBLIC_PATHS = ['/login', '/api/auth'];
 
-export async function proxy(req: NextRequest) {
+// NextAuth v5: use auth as a wrapper so req.auth is populated from the JWT
+export default auth((req) => {
   const { pathname } = req.nextUrl;
 
-  // Let auth API and login through without session check
-  if (pathname.startsWith('/api/auth') || pathname === '/login') {
+  // Always allow public paths through
+  if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
   }
 
-  const session = await auth();
-
   // Unauthenticated → login
-  if (!session) {
-    return NextResponse.redirect(new URL('/login', req.nextUrl));
+  if (!req.auth) {
+    return NextResponse.redirect(new URL('/login', req.url));
   }
 
   // Admin-only routes
   const isAdminPath = ADMIN_PATHS.some((p) => pathname.startsWith(p));
   if (isAdminPath) {
-    const role = session.user?.orgRole;
+    const role = req.auth.user?.orgRole;
     if (role !== 'admin' && role !== 'owner') {
-      return NextResponse.redirect(new URL('/account', req.nextUrl));
+      return NextResponse.redirect(new URL('/account', req.url));
     }
   }
 
   return NextResponse.next();
-}
+});
 
 export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
