@@ -15,8 +15,8 @@ export type CommitmentPoint = {
 };
 
 const chartConfig = {
-  created:  { label: 'Created',  color: 'hsl(var(--chart-1))' },
-  resolved: { label: 'Resolved', color: 'hsl(var(--chart-3))' },
+  created:  { label: 'Created',  color: 'var(--chart-3)' },
+  resolved: { label: 'Resolved', color: 'var(--chart-2)' },
 } satisfies ChartConfig;
 
 export function CommitmentChart({ data }: { data: CommitmentPoint[] }) {

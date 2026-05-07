@@ -16,8 +16,8 @@ export type ActivityPoint = {
 };
 
 const chartConfig = {
-  scanned:  { label: 'Emails scanned',  color: 'hsl(var(--chart-1))' },
-  surfaced: { label: 'Emails surfaced', color: 'hsl(var(--chart-2))' },
+  scanned:  { label: 'Emails scanned',  color: 'var(--chart-1)' },
+  surfaced: { label: 'Emails surfaced', color: 'var(--chart-2)' },
 } satisfies ChartConfig;
 
 export function ActivityChart({ data }: { data: ActivityPoint[] }) {
