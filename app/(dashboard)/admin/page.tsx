@@ -25,7 +25,13 @@ export default async function AdminPage() {
   const currentAnnouncement = announcementRow?.value ?? null;
 
   // Fetch all data in parallel
-  const [{ data: users }, { data: triageSessions }, { data: orgs }, { data: orgMembers }, { data: rawInvites }] =
+  const [
+    { data: users, error: usersError },
+    { data: triageSessions },
+    { data: orgs },
+    { data: orgMembers },
+    { data: rawInvites },
+  ] =
     await Promise.all([
       supabaseAdmin
         .from('users')
@@ -54,6 +60,24 @@ export default async function AdminPage() {
         .is('accepted_at', null)
         .order('created_at', { ascending: false }),
     ]);
+
+  // Surface DB errors clearly instead of silently showing empty tables.
+  // Most common cause: a migration hasn't been run yet and a new column is missing.
+  if (usersError) {
+    return (
+      <div className="max-w-2xl space-y-3">
+        <h2 className="text-lg font-semibold">Admin</h2>
+        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 space-y-1">
+          <p className="font-medium">Failed to load users — database error</p>
+          <p className="font-mono text-xs opacity-80">{usersError.message}</p>
+          <p className="text-xs opacity-70 pt-1">
+            If this mentions an unknown column, a pending migration may not have been run.
+            Check the <code>database/</code> folder for SQL files to run in Supabase.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // ── triage map ────────────────────────────────────────────────────────────
   const triageMap = new Map<string, { count: number; lastDate: string }>();
