@@ -45,7 +45,7 @@ export default async function BillingPage() {
 
   const { data: user } = await supabaseAdmin
     .from('users')
-    .select('created_at, stripe_customer_id')
+    .select('created_at, stripe_customer_id, stripe_price_id')
     .eq('id', userId)
     .single();
 
@@ -92,6 +92,19 @@ export default async function BillingPage() {
   // Plan display helpers
   const PLAN_LABELS: Record<string, string> = { free: 'Free', pro: 'Pro', team: 'Team' };
 
+  // Maps Stripe Price IDs → human-readable billing cadence.
+  // When you create a new price, add an entry here with the new price_id.
+  // Existing subscribers keep their old entry — that's how grandfathering works.
+  const PRICE_LABELS: Record<string, string> = {
+    [process.env.STRIPE_PRO_MONTHLY_PRICE_ID!]: '$12 / month',
+    [process.env.STRIPE_PRO_ANNUAL_PRICE_ID!]:  '$99 / year',
+    // e.g. when you raise prices: [process.env.STRIPE_PRO_MONTHLY_V2_PRICE_ID!]: '$15 / month',
+  };
+
+  const billingLabel = user?.stripe_price_id
+    ? (PRICE_LABELS[user.stripe_price_id] ?? 'Custom plan')
+    : null;
+
   return (
     <div className="max-w-3xl space-y-8">
       <div>
@@ -128,6 +141,12 @@ export default async function BillingPage() {
               <dt className="text-xs text-muted-foreground">Plan</dt>
               <dd className="mt-0.5 font-medium">{PLAN_LABELS[planTier] ?? planTier}</dd>
             </div>
+            {billingLabel && (
+              <div>
+                <dt className="text-xs text-muted-foreground">Billing</dt>
+                <dd className="mt-0.5 font-medium">{billingLabel}</dd>
+              </div>
+            )}
             <div>
               <dt className="text-xs text-muted-foreground">Member since</dt>
               <dd className="mt-0.5 font-medium">{memberSince}</dd>

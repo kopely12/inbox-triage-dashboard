@@ -62,12 +62,13 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     ? new Date(item.current_period_end * 1000).toISOString()
     : null;
   const quantity  = item?.quantity ?? 1;
+  const priceId   = item?.price?.id ?? null;
 
   if (userId) {
     // Individual Pro subscription
     await supabaseAdmin
       .from('users')
-      .update({ plan_tier: 'pro', stripe_customer_id: customerId })
+      .update({ plan_tier: 'pro', stripe_customer_id: customerId, stripe_price_id: priceId })
       .eq('id', userId);
   }
 
@@ -108,13 +109,16 @@ async function handleSubscriptionUpdated(sub: Stripe.Subscription) {
     ? new Date(item.current_period_end * 1000).toISOString()
     : null;
   const quantity  = item?.quantity ?? 1;
+  const priceId   = item?.price?.id ?? null;
 
   if (userId) {
-    // Sync plan tier with subscription status
+    // Sync plan tier and active price with subscription status.
+    // Keeping stripe_price_id up to date here means it automatically
+    // reflects mid-cycle price changes (e.g. from a Subscription Schedule).
     const planTier = (status === 'active' || status === 'trialing') ? 'pro' : 'free';
     await supabaseAdmin
       .from('users')
-      .update({ plan_tier: planTier })
+      .update({ plan_tier: planTier, stripe_price_id: priceId })
       .eq('id', userId);
   }
 
@@ -136,7 +140,7 @@ async function handleSubscriptionDeleted(sub: Stripe.Subscription) {
   if (userId) {
     await supabaseAdmin
       .from('users')
-      .update({ plan_tier: 'free' })
+      .update({ plan_tier: 'free', stripe_price_id: null })
       .eq('id', userId);
   }
 
