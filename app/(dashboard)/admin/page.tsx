@@ -32,7 +32,7 @@ export default async function AdminPage() {
 
       supabaseAdmin
         .from('organizations')
-        .select('id, name, owner_id, created_at')
+        .select('id, name, owner_id, created_at, billing_email, billing_provider, subscription_status, current_period_end, seat_count, stripe_customer_id, stripe_subscription_id, custom_notes')
         .order('created_at', { ascending: false }),
 
       supabaseAdmin
@@ -101,7 +101,21 @@ export default async function AdminPage() {
         };
       });
 
-    return { id: org.id, name: org.name, createdAt: org.created_at, memberCount: members.length, members };
+    return {
+      id:                   org.id,
+      name:                 org.name,
+      createdAt:            org.created_at,
+      memberCount:          members.length,
+      members,
+      billingProvider:      org.billing_provider     ?? 'stripe',
+      billingEmail:         org.billing_email        ?? null,
+      subscriptionStatus:   org.subscription_status  ?? 'active',
+      currentPeriodEnd:     org.current_period_end   ?? null,
+      seatCount:            org.seat_count           ?? 5,
+      stripeCustomerId:     org.stripe_customer_id   ?? null,
+      stripeSubscriptionId: org.stripe_subscription_id ?? null,
+      customNotes:          org.custom_notes         ?? null,
+    };
   });
 
   return (

@@ -96,13 +96,69 @@ export async function changeRole(memberId: string, newRole: 'admin' | 'member') 
 export async function removeMember(memberId: string) {
   await requireAdmin();
 
+  // Fetch the member to check role before attempting deletion
+  const { data: member } = await supabaseAdmin
+    .from('org_members')
+    .select('role, user_id')
+    .eq('id', memberId)
+    .single();
+
+  if (member?.role === 'owner') {
+    return { error: 'Transfer ownership to another member before leaving or removing the owner.' };
+  }
+
   const { error } = await supabaseAdmin
     .from('org_members')
     .delete()
-    .eq('id', memberId)
-    .neq('role', 'owner'); // can't remove owner
+    .eq('id', memberId);
 
   if (error) return { error: 'Failed to remove member.' };
+
+  // Clear org fields on the user row
+  if (member?.user_id) {
+    await supabaseAdmin
+      .from('users')
+      .update({ org_id: null, org_role: null })
+      .eq('id', member.user_id);
+  }
+
+  revalidatePath('/team');
+  return { success: true };
+}
+
+export async function transferOwnership(newOwnerMemberId: string) {
+  const session = await requireAdmin();
+  if (session.user.orgRole !== 'owner') return { error: 'Only the current owner can transfer ownership.' };
+
+  // Find the caller's own member record
+  const { data: myMember } = await supabaseAdmin
+    .from('org_members')
+    .select('id, org_id')
+    .eq('user_id', session.user.id)
+    .eq('role', 'owner')
+    .single();
+
+  if (!myMember) return { error: 'Owner record not found.' };
+
+  // Verify new owner is in the same org
+  const { data: newMember } = await supabaseAdmin
+    .from('org_members')
+    .select('user_id, role')
+    .eq('id', newOwnerMemberId)
+    .eq('org_id', myMember.org_id)
+    .single();
+
+  if (!newMember) return { error: 'Member not found in your organization.' };
+  if (newMember.role === 'owner') return { error: 'Already the owner.' };
+
+  await Promise.all([
+    supabaseAdmin.from('org_members').update({ role: 'admin' }).eq('id', myMember.id),
+    supabaseAdmin.from('org_members').update({ role: 'owner' }).eq('id', newOwnerMemberId),
+    supabaseAdmin.from('organizations').update({ owner_id: newMember.user_id }).eq('id', myMember.org_id),
+    supabaseAdmin.from('users').update({ org_role: 'admin' }).eq('id', session.user.id),
+    supabaseAdmin.from('users').update({ org_role: 'owner' }).eq('id', newMember.user_id),
+  ]);
+
   revalidatePath('/team');
   return { success: true };
 }
