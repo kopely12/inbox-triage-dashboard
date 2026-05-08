@@ -18,13 +18,69 @@ async function requireSuperAdmin() {
 export async function setUserPlan(userId: string, plan: string) {
   await requireSuperAdmin();
 
+  // Also clear comped_until when manually overriding the plan, so a stale
+  // comp date doesn't re-appear in the UI or confuse the expiry cron.
+  const updates: Record<string, unknown> = {
+    plan_tier:   plan,
+    updated_at:  new Date().toISOString(),
+    ...(plan !== 'pro' && { comped_until: null }),
+  };
+
   const { error } = await supabaseAdmin
     .from('users')
-    .update({ plan_tier: plan, updated_at: new Date().toISOString() })
+    .update(updates)
     .eq('id', userId);
 
   if (error) throw new Error(error.message);
   revalidatePath('/admin');
+}
+
+// ─── comp / trial access ──────────────────────────────────────────────────────
+
+export async function compUser(
+  userId: string,
+  until:  string, // ISO date string e.g. "2025-09-01"
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const session = await auth();
+  if (!session?.user?.isSuperAdmin) return { ok: false, error: 'Unauthorized' };
+
+  const date = new Date(until);
+  if (isNaN(date.getTime()) || date <= new Date()) {
+    return { ok: false, error: 'Date must be in the future.' };
+  }
+
+  const { error } = await supabaseAdmin
+    .from('users')
+    .update({
+      plan_tier:    'pro',
+      comped_until: date.toISOString(),
+      updated_at:   new Date().toISOString(),
+    })
+    .eq('id', userId);
+
+  if (error) return { ok: false, error: error.message };
+  revalidatePath('/admin');
+  return { ok: true };
+}
+
+export async function removeComp(
+  userId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const session = await auth();
+  if (!session?.user?.isSuperAdmin) return { ok: false, error: 'Unauthorized' };
+
+  const { error } = await supabaseAdmin
+    .from('users')
+    .update({
+      plan_tier:    'free',
+      comped_until: null,
+      updated_at:   new Date().toISOString(),
+    })
+    .eq('id', userId);
+
+  if (error) return { ok: false, error: error.message };
+  revalidatePath('/admin');
+  return { ok: true };
 }
 
 // ─── delete user ──────────────────────────────────────────────────────────────

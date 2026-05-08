@@ -4,10 +4,12 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Users, UserCheck, Zap, CalendarPlus, Activity } from 'lucide-react';
-import { AdminTabs } from '@/components/admin/admin-tabs';
+import { AdminTabs }            from '@/components/admin/admin-tabs';
+import { AnnouncementManager }  from '@/components/admin/announcement-manager';
 import type { UserRow }           from '@/components/admin/users-panel';
 import type { OrgRow, OrgMemberInfo } from '@/components/admin/orgs-panel';
 import type { InviteRow }         from '@/components/admin/invites-panel';
+import { getAnnouncement }        from '@/lib/get-announcement';
 
 // ─── page ─────────────────────────────────────────────────────────────────────
 
@@ -18,12 +20,16 @@ export default async function AdminPage() {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const monthStart    = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
 
+  // Announcement (shared cache with layout — no extra DB round-trip in practice)
+  const announcementRow = await getAnnouncement();
+  const currentAnnouncement = announcementRow?.value ?? null;
+
   // Fetch all data in parallel
   const [{ data: users }, { data: triageSessions }, { data: orgs }, { data: orgMembers }, { data: rawInvites }] =
     await Promise.all([
       supabaseAdmin
         .from('users')
-        .select('id, email, name, plan_tier, org_role, created_at, admin_notes, suspended_at, stripe_customer_id, last_seen_at')
+        .select('id, email, name, plan_tier, org_role, created_at, admin_notes, suspended_at, stripe_customer_id, last_seen_at, comped_until')
         .order('created_at', { ascending: false }),
 
       supabaseAdmin
@@ -89,7 +95,7 @@ export default async function AdminPage() {
       id: u.id, email: u.email, name, initials, plan, org_role: u.org_role,
       created_at: u.created_at, admin_notes: u.admin_notes ?? null,
       suspended_at: u.suspended_at ?? null, stripe_customer_id: u.stripe_customer_id ?? null,
-      last_seen_at: u.last_seen_at ?? null,
+      last_seen_at: u.last_seen_at ?? null, comped_until: u.comped_until ?? null,
       triage, status,
     };
   });
@@ -163,6 +169,9 @@ export default async function AdminPage() {
         </div>
         <Badge variant="secondary" className="text-xs">Super admin</Badge>
       </div>
+
+      {/* Announcement manager */}
+      <AnnouncementManager current={currentAnnouncement} />
 
       {/* Stat tiles */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">

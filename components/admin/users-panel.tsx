@@ -14,6 +14,7 @@ import { DeleteUserButton }   from '@/components/admin/delete-user-button';
 import { NoteCell }           from '@/components/admin/note-cell';
 import { SuspendButton }      from '@/components/admin/suspend-button';
 import { ImpersonateButton }  from '@/components/admin/impersonate-button';
+import { CompButton }         from '@/components/admin/comp-button';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ export type UserRow = {
   suspended_at:       string | null;
   stripe_customer_id: string | null;
   last_seen_at:       string | null;
+  comped_until:       string | null;
   triage:             { count: number; lastDate: string } | undefined;
   status:             'active' | 'inactive' | 'never';
 };
@@ -49,11 +51,12 @@ function relDate(iso: string) {
 }
 
 function exportCSV(rows: UserRow[]) {
-  const headers = ['Name', 'Email', 'Plan', 'Role', 'Joined', 'Last Seen', 'Triages', 'Last Triage', 'Status', 'Suspended', 'Notes'];
+  const headers = ['Name', 'Email', 'Plan', 'Comped Until', 'Role', 'Joined', 'Last Seen', 'Triages', 'Last Triage', 'Status', 'Suspended', 'Notes'];
   const lines = rows.map((r) => [
     `"${r.name.replace(/"/g, '""')}"`,
     `"${r.email}"`,
     r.plan,
+    r.comped_until?.slice(0, 10) ?? '',
     r.org_role ?? 'member',
     r.created_at.slice(0, 10),
     r.last_seen_at?.slice(0, 10) ?? '',
@@ -172,7 +175,17 @@ export function UsersPanel({ rows }: { rows: UserRow[] }) {
                   </TableCell>
 
                   <TableCell>
-                    <PlanSelect userId={row.id} currentPlan={row.plan} />
+                    <div className="flex items-center gap-1.5">
+                      <PlanSelect userId={row.id} currentPlan={row.plan} />
+                      {row.comped_until && new Date(row.comped_until) > new Date() && (
+                        <span
+                          title={`Comped until ${new Date(row.comped_until).toLocaleDateString()}`}
+                          className="text-[10px] font-semibold px-1.5 py-px rounded-full bg-amber-100 text-amber-700 border border-amber-300 whitespace-nowrap leading-none"
+                        >
+                          comped
+                        </span>
+                      )}
+                    </div>
                   </TableCell>
 
                   <TableCell className="text-sm text-muted-foreground capitalize">
@@ -213,6 +226,11 @@ export function UsersPanel({ rows }: { rows: UserRow[] }) {
 
                   <TableCell className="pr-5">
                     <div className="flex items-center gap-0.5">
+                      <CompButton
+                        userId={row.id}
+                        userName={row.name}
+                        compedUntil={row.comped_until}
+                      />
                       <ImpersonateButton userId={row.id} userName={row.name ?? row.email} />
                       <SuspendButton
                         userId={row.id}
