@@ -22,7 +22,7 @@ export default async function AdminPage() {
     await Promise.all([
       supabaseAdmin
         .from('users')
-        .select('id, email, name, plan_tier, org_role, created_at, admin_notes')
+        .select('id, email, name, plan_tier, org_role, created_at, admin_notes, suspended_at, stripe_customer_id')
         .order('created_at', { ascending: false }),
 
       supabaseAdmin
@@ -77,7 +77,7 @@ export default async function AdminPage() {
     const initials  = name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
     const isActive  = triage && triage.lastDate >= thirtyDaysAgo;
     const status: UserRow['status'] = isActive ? 'active' : triage ? 'inactive' : 'never';
-    return { id: u.id, email: u.email, name, initials, plan, org_role: u.org_role, created_at: u.created_at, admin_notes: u.admin_notes ?? null, triage, status };
+    return { id: u.id, email: u.email, name, initials, plan, org_role: u.org_role, created_at: u.created_at, admin_notes: u.admin_notes ?? null, suspended_at: u.suspended_at ?? null, stripe_customer_id: u.stripe_customer_id ?? null, triage, status };
   });
 
   // ── org rows ──────────────────────────────────────────────────────────────

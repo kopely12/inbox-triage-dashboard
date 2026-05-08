@@ -33,6 +33,16 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         console.error('[auth] upsert error:', error.message);
         return false;
       }
+
+      // Block suspended accounts
+      const { data: dbUser } = await supabaseAdmin
+        .from('users')
+        .select('suspended_at')
+        .eq('email', user.email)
+        .single();
+
+      if (dbUser?.suspended_at) return false;
+
       return true;
     },
 

@@ -59,6 +59,32 @@ export async function saveAdminNote(userId: string, note: string) {
   revalidatePath('/admin');
 }
 
+// ─── suspend / unsuspend ──────────────────────────────────────────────────────
+
+export async function suspendUser(userId: string) {
+  await requireSuperAdmin();
+
+  const { error } = await supabaseAdmin
+    .from('users')
+    .update({ suspended_at: new Date().toISOString() })
+    .eq('id', userId);
+
+  if (error) throw new Error(error.message);
+  revalidatePath('/admin');
+}
+
+export async function unsuspendUser(userId: string) {
+  await requireSuperAdmin();
+
+  const { error } = await supabaseAdmin
+    .from('users')
+    .update({ suspended_at: null })
+    .eq('id', userId);
+
+  if (error) throw new Error(error.message);
+  revalidatePath('/admin');
+}
+
 // ─── org: change role ─────────────────────────────────────────────────────────
 
 export async function adminChangeOrgRole(memberId: string, role: 'admin' | 'member') {

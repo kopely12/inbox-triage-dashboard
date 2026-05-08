@@ -8,24 +8,27 @@ import { Input } from '@/components/ui/input';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
-import { Download, Search } from 'lucide-react';
+import { Download, ExternalLink, Search } from 'lucide-react';
 import { PlanSelect }       from '@/components/admin/plan-select';
 import { DeleteUserButton } from '@/components/admin/delete-user-button';
 import { NoteCell }         from '@/components/admin/note-cell';
+import { SuspendButton }    from '@/components/admin/suspend-button';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
 export type UserRow = {
-  id:          string;
-  email:       string;
-  name:        string;
-  initials:    string;
-  plan:        'free' | 'pro' | 'team';
-  org_role:    string | null;
-  created_at:  string;
-  admin_notes: string | null;
-  triage:      { count: number; lastDate: string } | undefined;
-  status:      'active' | 'inactive' | 'never';
+  id:                 string;
+  email:              string;
+  name:               string;
+  initials:           string;
+  plan:               'free' | 'pro' | 'team';
+  org_role:           string | null;
+  created_at:         string;
+  admin_notes:        string | null;
+  suspended_at:       string | null;
+  stripe_customer_id: string | null;
+  triage:             { count: number; lastDate: string } | undefined;
+  status:             'active' | 'inactive' | 'never';
 };
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -44,7 +47,7 @@ function relDate(iso: string) {
 }
 
 function exportCSV(rows: UserRow[]) {
-  const headers = ['Name', 'Email', 'Plan', 'Role', 'Joined', 'Triages', 'Last Triage', 'Status', 'Notes'];
+  const headers = ['Name', 'Email', 'Plan', 'Role', 'Joined', 'Triages', 'Last Triage', 'Status', 'Suspended', 'Notes'];
   const lines = rows.map((r) => [
     `"${r.name.replace(/"/g, '""')}"`,
     `"${r.email}"`,
@@ -54,6 +57,7 @@ function exportCSV(rows: UserRow[]) {
     String(r.triage?.count ?? 0),
     r.triage?.lastDate.slice(0, 10) ?? '',
     r.status,
+    r.suspended_at ? 'yes' : 'no',
     `"${(r.admin_notes ?? '').replace(/"/g, '""')}"`,
   ].join(','));
 
@@ -127,7 +131,7 @@ export function UsersPanel({ rows }: { rows: UserRow[] }) {
               <TableHead className="text-right">Triages</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Notes</TableHead>
-              <TableHead className="pr-5 w-10" />
+              <TableHead className="pr-5 w-24" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -149,6 +153,17 @@ export function UsersPanel({ rows }: { rows: UserRow[] }) {
                         <p className="text-sm font-medium truncate">{row.name}</p>
                         <p className="text-xs text-muted-foreground truncate">{row.email}</p>
                       </div>
+                      {row.stripe_customer_id && (
+                        <a
+                          href={`https://dashboard.stripe.com/customers/${row.stripe_customer_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Open in Stripe"
+                          className="ml-auto shrink-0 p-1 rounded text-muted-foreground/50 hover:text-[#635bff] transition-colors"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
                     </div>
                   </TableCell>
 
@@ -173,7 +188,9 @@ export function UsersPanel({ rows }: { rows: UserRow[] }) {
                   </TableCell>
 
                   <TableCell>
-                    {row.status === 'active' ? (
+                    {row.suspended_at ? (
+                      <Badge variant="outline" className="text-xs text-red-600 border-red-300 bg-red-50">Suspended</Badge>
+                    ) : row.status === 'active' ? (
                       <Badge variant="outline" className="text-xs text-emerald-600 border-emerald-300 bg-emerald-50">Active</Badge>
                     ) : row.status === 'inactive' ? (
                       <Badge variant="outline" className="text-xs text-amber-600 border-amber-300 bg-amber-50">Inactive</Badge>
@@ -187,7 +204,14 @@ export function UsersPanel({ rows }: { rows: UserRow[] }) {
                   </TableCell>
 
                   <TableCell className="pr-5">
-                    <DeleteUserButton userId={row.id} email={row.email} />
+                    <div className="flex items-center gap-0.5">
+                      <SuspendButton
+                        userId={row.id}
+                        email={row.email}
+                        suspendedAt={row.suspended_at}
+                      />
+                      <DeleteUserButton userId={row.id} email={row.email} />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
