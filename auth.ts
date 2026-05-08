@@ -50,15 +50,18 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           token.planTier  = data.plan_tier;
           token.orgRole   = data.org_role;
         }
+
+        token.isSuperAdmin = user.email === process.env.SUPER_ADMIN_EMAIL;
       }
       return token;
     },
 
     async session({ session, token }) {
       if (token.userId) {
-        session.user.id       = token.userId as string;
-        session.user.planTier = token.planTier as string;
-        session.user.orgRole  = token.orgRole  as string | null;
+        session.user.id          = token.userId    as string;
+        session.user.planTier    = token.planTier  as string;
+        session.user.orgRole     = token.orgRole   as string | null;
+        session.user.isSuperAdmin = (token.isSuperAdmin as boolean) ?? false;
       }
       return session;
     },
@@ -74,12 +77,13 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 declare module 'next-auth' {
   interface Session {
     user: {
-      id:        string;
-      name?:     string | null;
-      email?:    string | null;
-      image?:    string | null;
-      planTier:  string;
-      orgRole:   string | null;
+      id:           string;
+      name?:        string | null;
+      email?:       string | null;
+      image?:       string | null;
+      planTier:     string;
+      orgRole:      string | null;
+      isSuperAdmin: boolean;
     };
   }
 }
