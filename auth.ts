@@ -46,8 +46,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       return true;
     },
 
-    async jwt({ token, account, user }) {
-      // On initial sign-in, fetch our user record and embed id + role in token
+    async jwt({ token, account, user, trigger, session }) {
+      // ── Initial sign-in ───────────────────────────────────────────────────
       if (account && user?.email) {
         const { data } = await supabaseAdmin
           .from('users')
@@ -56,22 +56,77 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           .single();
 
         if (data) {
-          token.userId    = data.id;
-          token.planTier  = data.plan_tier;
-          token.orgRole   = data.org_role;
+          token.userId   = data.id;
+          token.planTier = data.plan_tier;
+          token.orgRole  = data.org_role;
         }
 
-        token.isSuperAdmin = user.email === process.env.SUPER_ADMIN_EMAIL;
+        token.isSuperAdmin  = user.email === process.env.SUPER_ADMIN_EMAIL;
+        token.impersonating = null;
       }
+
+      // ── Start impersonation ───────────────────────────────────────────────
+      if (trigger === 'update' && (session as any)?.startImpersonation) {
+        // Security gate: only real super admins can impersonate
+        if (!token.isSuperAdmin) return token;
+
+        const targetId = (session as any).startImpersonation as string;
+        const { data: target } = await supabaseAdmin
+          .from('users')
+          .select('id, email, name, plan_tier, org_role')
+          .eq('id', targetId)
+          .single();
+
+        // Refuse to impersonate non-existent users or other super admins
+        if (!target || target.email === process.env.SUPER_ADMIN_EMAIL) return token;
+
+        // Stash real admin credentials in the token
+        token.realAdminId       = token.userId;
+        token.realAdminPlanTier = token.planTier;
+        token.realAdminOrgRole  = token.orgRole;
+        token.realAdminName     = token.name;
+        token.realAdminEmail    = token.email;
+
+        // Override token with target user's data
+        token.userId        = target.id;
+        token.planTier      = target.plan_tier;
+        token.orgRole       = target.org_role;
+        token.name          = target.name;
+        token.email         = target.email;
+        token.isSuperAdmin  = false;
+        token.impersonating = { id: target.id, name: target.name, email: target.email };
+      }
+
+      // ── Stop impersonation ────────────────────────────────────────────────
+      if (trigger === 'update' && (session as any)?.stopImpersonation) {
+        if (!token.realAdminId) return token;
+
+        token.userId        = token.realAdminId;
+        token.planTier      = token.realAdminPlanTier;
+        token.orgRole       = token.realAdminOrgRole;
+        token.name          = token.realAdminName  as string | null | undefined;
+        token.email         = token.realAdminEmail as string | null | undefined;
+        token.isSuperAdmin  = true;
+        token.impersonating = null;
+
+        delete token.realAdminId;
+        delete token.realAdminPlanTier;
+        delete token.realAdminOrgRole;
+        delete token.realAdminName;
+        delete token.realAdminEmail;
+      }
+
       return token;
     },
 
     async session({ session, token }) {
       if (token.userId) {
-        session.user.id          = token.userId    as string;
-        session.user.planTier    = token.planTier  as string;
-        session.user.orgRole     = token.orgRole   as string | null;
+        session.user.id           = token.userId       as string;
+        session.user.planTier     = token.planTier     as string;
+        session.user.orgRole      = token.orgRole      as string | null;
         session.user.isSuperAdmin = (token.isSuperAdmin as boolean) ?? false;
+        session.user.impersonating =
+          (token.impersonating as { id: string; name: string; email: string } | null) ?? null;
       }
       return session;
     },
@@ -83,17 +138,19 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   },
 });
 
-// Augment NextAuth types
+// ─── NextAuth type augmentation ───────────────────────────────────────────────
+
 declare module 'next-auth' {
   interface Session {
     user: {
-      id:           string;
-      name?:        string | null;
-      email?:       string | null;
-      image?:       string | null;
-      planTier:     string;
-      orgRole:      string | null;
-      isSuperAdmin: boolean;
+      id:            string;
+      name?:         string | null;
+      email?:        string | null;
+      image?:        string | null;
+      planTier:      string;
+      orgRole:       string | null;
+      isSuperAdmin:  boolean;
+      impersonating: { id: string; name: string; email: string } | null;
     };
   }
 }

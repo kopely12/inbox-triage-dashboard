@@ -9,10 +9,11 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { Download, ExternalLink, Search } from 'lucide-react';
-import { PlanSelect }       from '@/components/admin/plan-select';
-import { DeleteUserButton } from '@/components/admin/delete-user-button';
-import { NoteCell }         from '@/components/admin/note-cell';
-import { SuspendButton }    from '@/components/admin/suspend-button';
+import { PlanSelect }         from '@/components/admin/plan-select';
+import { DeleteUserButton }   from '@/components/admin/delete-user-button';
+import { NoteCell }           from '@/components/admin/note-cell';
+import { SuspendButton }      from '@/components/admin/suspend-button';
+import { ImpersonateButton }  from '@/components/admin/impersonate-button';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -205,6 +206,7 @@ export function UsersPanel({ rows }: { rows: UserRow[] }) {
 
                   <TableCell className="pr-5">
                     <div className="flex items-center gap-0.5">
+                      <ImpersonateButton userId={row.id} userName={row.name ?? row.email} />
                       <SuspendButton
                         userId={row.id}
                         email={row.email}
