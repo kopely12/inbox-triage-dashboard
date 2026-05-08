@@ -36,6 +36,7 @@ export async function createOrg(fields: {
   seatCount:       number;
   billingEmail:    string;
   billingProvider: string;
+  billingCycle:    string;
   billingAmount:   number | null;
 }) {
   await requireSuperAdmin();
@@ -57,6 +58,7 @@ export async function createOrg(fields: {
       seat_count:          fields.seatCount,
       billing_email:       fields.billingEmail.trim() || null,
       billing_provider:    fields.billingProvider,
+      billing_cycle:       fields.billingCycle,
       billing_amount:      fields.billingAmount,
       subscription_status: 'active',
     })
@@ -87,6 +89,7 @@ export type OrgBillingFields = {
   subscription_status?:     string;
   current_period_end?:      string | null;
   seat_count?:              number;
+  billing_cycle?:           string;
   billing_amount?:          number | null;
   stripe_customer_id?:      string | null;
   stripe_subscription_id?:  string | null;

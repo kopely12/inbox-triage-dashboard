@@ -11,15 +11,49 @@ import { Loader2 } from 'lucide-react';
 import type { UserRow } from '@/components/admin/users-panel';
 
 const PROVIDER_OPTIONS = ['stripe', 'manual'] as const;
+const CYCLE_OPTIONS    = ['monthly', 'annual']  as const;
 
 const DEFAULTS = {
   name:            '',
   ownerId:         '',
   seatCount:       5,
   billingEmail:    '',
-  billingProvider: 'stripe' as string,
+  billingProvider: 'stripe'   as string,
+  billingCycle:    'monthly'  as string,
   billingAmount:   '',
 };
+
+function ToggleGroup({
+  options,
+  value,
+  onChange,
+  disabled,
+}: {
+  options:  readonly string[];
+  value:    string;
+  onChange: (v: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="flex gap-2">
+      {options.map((opt) => (
+        <button
+          key={opt}
+          type="button"
+          onClick={() => onChange(opt)}
+          disabled={disabled}
+          className={`px-4 py-1.5 rounded-md border text-sm font-medium capitalize transition-colors disabled:opacity-50 ${
+            value === opt
+              ? 'bg-primary text-primary-foreground border-primary'
+              : 'border-input text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          {opt}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export function CreateOrgModal({
   open,
@@ -28,7 +62,7 @@ export function CreateOrgModal({
 }: {
   open:           boolean;
   onClose:        () => void;
-  eligibleOwners: UserRow[];   // users not already in an org
+  eligibleOwners: UserRow[];
 }) {
   const [fields, setFields]        = useState(DEFAULTS);
   const [error,  setError]         = useState<string | null>(null);
@@ -57,6 +91,7 @@ export function CreateOrgModal({
           seatCount:       Number(fields.seatCount),
           billingEmail:    fields.billingEmail,
           billingProvider: fields.billingProvider,
+          billingCycle:    fields.billingCycle,
           billingAmount:   fields.billingAmount !== '' ? Number(fields.billingAmount) : null,
         });
         toast.success(`"${fields.name.trim()}" created`);
@@ -66,6 +101,8 @@ export function CreateOrgModal({
       }
     });
   }
+
+  const amountLabel = fields.billingCycle === 'annual' ? '$/yr (total)' : '$/mo';
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
@@ -81,7 +118,9 @@ export function CreateOrgModal({
 
           {/* Org name */}
           <div className="space-y-1.5">
-            <Label htmlFor="org-name">Organization name <span className="text-destructive">*</span></Label>
+            <Label htmlFor="org-name">
+              Organization name <span className="text-destructive">*</span>
+            </Label>
             <Input
               id="org-name"
               placeholder="Acme Corp"
@@ -116,33 +155,47 @@ export function CreateOrgModal({
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            {/* Seat count */}
+          {/* Seats */}
+          <div className="space-y-1.5">
+            <Label htmlFor="seat-count">Seats</Label>
+            <Input
+              id="seat-count"
+              type="number"
+              min={1}
+              value={fields.seatCount}
+              onChange={(e) => set('seatCount', Number(e.target.value))}
+              disabled={pending}
+            />
+          </div>
+
+          {/* Billing cycle + amount */}
+          <div className="space-y-3 rounded-lg border border-border p-3 bg-muted/30">
             <div className="space-y-1.5">
-              <Label htmlFor="seat-count">Seats</Label>
-              <Input
-                id="seat-count"
-                type="number"
-                min={1}
-                value={fields.seatCount}
-                onChange={(e) => set('seatCount', Number(e.target.value))}
+              <Label>Billing cycle</Label>
+              <ToggleGroup
+                options={CYCLE_OPTIONS}
+                value={fields.billingCycle}
+                onChange={(v) => set('billingCycle', v)}
                 disabled={pending}
               />
             </div>
-
-            {/* Monthly amount */}
             <div className="space-y-1.5">
-              <Label htmlFor="amount">$/mo</Label>
+              <Label htmlFor="amount">{amountLabel}</Label>
               <Input
                 id="amount"
                 type="number"
                 min={0}
                 step={0.01}
-                placeholder="290.00"
+                placeholder={fields.billingCycle === 'annual' ? '3480.00' : '290.00'}
                 value={fields.billingAmount}
                 onChange={(e) => set('billingAmount', e.target.value)}
                 disabled={pending}
               />
+              {fields.billingCycle === 'annual' && fields.billingAmount !== '' && (
+                <p className="text-[11px] text-muted-foreground">
+                  ≈ ${(Number(fields.billingAmount) / 12).toFixed(2)}/mo equivalent
+                </p>
+              )}
             </div>
           </div>
 
@@ -159,29 +212,17 @@ export function CreateOrgModal({
             />
           </div>
 
-          {/* Provider */}
+          {/* Payment provider */}
           <div className="space-y-1.5">
             <Label>Payment provider</Label>
-            <div className="flex gap-2">
-              {PROVIDER_OPTIONS.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => set('billingProvider', p)}
-                  disabled={pending}
-                  className={`px-4 py-1.5 rounded-md border text-sm font-medium capitalize transition-colors ${
-                    fields.billingProvider === p
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'border-input text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
+            <ToggleGroup
+              options={PROVIDER_OPTIONS}
+              value={fields.billingProvider}
+              onChange={(v) => set('billingProvider', v)}
+              disabled={pending}
+            />
           </div>
 
-          {/* Error */}
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <div className="flex justify-end gap-2 pt-1 border-t border-border">

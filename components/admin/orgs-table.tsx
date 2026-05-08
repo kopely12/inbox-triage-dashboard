@@ -20,9 +20,10 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function fmtAmount(amount: number | null) {
+function fmtAmount(amount: number | null, cycle: string) {
   if (amount === null) return '—';
-  return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}/mo`;
+  const suffix = cycle === 'annual' ? '/yr' : '/mo';
+  return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}${suffix}`;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -151,7 +152,7 @@ export function OrgsTable({ orgs, userRows }: { orgs: OrgRow[]; userRows: UserRo
 
                     {/* Amount */}
                     <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
-                      {fmtAmount(org.billingAmount)}
+                      {fmtAmount(org.billingAmount, org.billingCycle)}
                     </TableCell>
 
                     {/* Renewal */}
@@ -221,6 +222,7 @@ export function OrgsTable({ orgs, userRows }: { orgs: OrgRow[]; userRows: UserRo
           initial={{
             billingEmail:         modal.org.billingEmail         ?? '',
             billingProvider:      modal.org.billingProvider      ?? 'stripe',
+            billingCycle:         modal.org.billingCycle         ?? 'monthly',
             subscriptionStatus:   modal.org.subscriptionStatus   ?? 'active',
             currentPeriodEnd:     modal.org.currentPeriodEnd     ?? '',
             seatCount:            modal.org.seatCount            ?? 5,

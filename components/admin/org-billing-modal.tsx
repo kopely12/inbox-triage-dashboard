@@ -18,6 +18,7 @@ type Props = {
   initial: {
     billingEmail:         string;
     billingProvider:      string;
+    billingCycle:         string;
     subscriptionStatus:   string;
     currentPeriodEnd:     string;
     seatCount:            number;
@@ -29,7 +30,36 @@ type Props = {
 };
 
 const STATUS_OPTIONS   = ['active', 'trialing', 'past_due', 'canceled'] as const;
-const PROVIDER_OPTIONS = ['stripe', 'manual'] as const;
+const PROVIDER_OPTIONS = ['stripe', 'manual']  as const;
+const CYCLE_OPTIONS    = ['monthly', 'annual'] as const;
+
+function ToggleGroup({
+  options,
+  value,
+  onChange,
+}: {
+  options:  readonly string[];
+  value:    string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex gap-2">
+      {options.map((opt) => (
+        <button
+          key={opt}
+          onClick={() => onChange(opt)}
+          className={`px-4 py-1.5 rounded-md border text-sm font-medium capitalize transition-colors ${
+            value === opt
+              ? 'bg-primary text-primary-foreground border-primary'
+              : 'border-input text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          {opt}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export function OrgBillingModal({ open, onClose, orgId, orgName, initial }: Props) {
   const [fields, setFields]        = useState(initial);
@@ -45,6 +75,7 @@ export function OrgBillingModal({ open, onClose, orgId, orgName, initial }: Prop
         const payload: OrgBillingFields = {
           billing_email:           fields.billingEmail.trim() || null,
           billing_provider:        fields.billingProvider,
+          billing_cycle:           fields.billingCycle,
           subscription_status:     fields.subscriptionStatus,
           current_period_end:      fields.currentPeriodEnd || null,
           seat_count:              Number(fields.seatCount),
@@ -73,23 +104,23 @@ export function OrgBillingModal({ open, onClose, orgId, orgName, initial }: Prop
 
         <div className="space-y-5 pt-1">
 
-          {/* Provider */}
-          <div className="space-y-1.5">
-            <Label>Payment provider</Label>
-            <div className="flex gap-2">
-              {PROVIDER_OPTIONS.map((p) => (
-                <button
-                  key={p}
-                  onClick={() => set('billingProvider', p)}
-                  className={`px-4 py-1.5 rounded-md border text-sm font-medium capitalize transition-colors ${
-                    fields.billingProvider === p
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'border-input text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
+          {/* Provider + cycle */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label>Payment provider</Label>
+              <ToggleGroup
+                options={PROVIDER_OPTIONS}
+                value={fields.billingProvider}
+                onChange={(v) => set('billingProvider', v)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Billing cycle</Label>
+              <ToggleGroup
+                options={CYCLE_OPTIONS}
+                value={fields.billingCycle}
+                onChange={(v) => set('billingCycle', v)}
+              />
             </div>
           </div>
 
@@ -135,18 +166,25 @@ export function OrgBillingModal({ open, onClose, orgId, orgName, initial }: Prop
               />
             </div>
 
-            {/* Monthly amount */}
+            {/* Amount */}
             <div className="space-y-1.5">
-              <Label htmlFor="amount">$/mo</Label>
+              <Label htmlFor="amount">
+                {fields.billingCycle === 'annual' ? '$/yr (total)' : '$/mo'}
+              </Label>
               <Input
                 id="amount"
                 type="number"
                 min={0}
                 step={0.01}
-                placeholder="290.00"
+                placeholder={fields.billingCycle === 'annual' ? '3480.00' : '290.00'}
                 value={fields.billingAmount}
                 onChange={(e) => set('billingAmount', e.target.value)}
               />
+              {fields.billingCycle === 'annual' && fields.billingAmount !== '' && (
+                <p className="text-[11px] text-muted-foreground">
+                  ≈ ${(Number(fields.billingAmount) / 12).toFixed(2)}/mo equivalent
+                </p>
+              )}
             </div>
           </div>
 

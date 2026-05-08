@@ -9,7 +9,8 @@ alter table organizations
   add column if not exists subscription_status     text        not null default 'active',
   add column if not exists current_period_end      timestamptz,
   add column if not exists seat_count              integer     not null default 5,
-  add column if not exists billing_amount          numeric(10,2),   -- monthly USD amount
+  add column if not exists billing_cycle           text        not null default 'monthly',
+  add column if not exists billing_amount          numeric(10,2),   -- amount per billing cycle (mo or yr)
   add column if not exists custom_notes            text;
 
 -- billing_provider:     'stripe' | 'manual'

@@ -32,7 +32,7 @@ export default async function AdminPage() {
 
       supabaseAdmin
         .from('organizations')
-        .select('id, name, owner_id, created_at, billing_email, billing_provider, subscription_status, current_period_end, seat_count, billing_amount, stripe_customer_id, stripe_subscription_id, custom_notes')
+        .select('id, name, owner_id, created_at, billing_email, billing_provider, billing_cycle, subscription_status, current_period_end, seat_count, billing_amount, stripe_customer_id, stripe_subscription_id, custom_notes')
         .order('created_at', { ascending: false }),
 
       supabaseAdmin
@@ -108,6 +108,7 @@ export default async function AdminPage() {
       memberCount:          members.length,
       members,
       billingProvider:      org.billing_provider     ?? 'stripe',
+      billingCycle:         org.billing_cycle        ?? 'monthly',
       billingEmail:         org.billing_email        ?? null,
       subscriptionStatus:   org.subscription_status  ?? 'active',
       currentPeriodEnd:     org.current_period_end   ?? null,

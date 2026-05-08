@@ -38,6 +38,7 @@ export type OrgRow = {
   subscriptionStatus:   string;
   currentPeriodEnd:     string | null;
   seatCount:            number;
+  billingCycle:         string;
   billingAmount:        number | null;
   stripeCustomerId:     string | null;
   stripeSubscriptionId: string | null;
@@ -275,6 +276,7 @@ function OrgCard({ org }: { org: OrgRow }) {
         initial={{
           billingEmail:         org.billingEmail         ?? '',
           billingProvider:      org.billingProvider      ?? 'stripe',
+          billingCycle:         org.billingCycle         ?? 'monthly',
           subscriptionStatus:   org.subscriptionStatus   ?? 'active',
           currentPeriodEnd:     org.currentPeriodEnd     ?? '',
           seatCount:            org.seatCount            ?? 5,
