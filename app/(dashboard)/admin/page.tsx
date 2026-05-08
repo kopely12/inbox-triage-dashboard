@@ -5,8 +5,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Users, UserCheck, Zap, CalendarPlus, Activity } from 'lucide-react';
 import { AdminTabs } from '@/components/admin/admin-tabs';
-import type { UserRow } from '@/components/admin/users-panel';
+import type { UserRow }           from '@/components/admin/users-panel';
 import type { OrgRow, OrgMemberInfo } from '@/components/admin/orgs-panel';
+import type { InviteRow }         from '@/components/admin/invites-panel';
 
 // ─── page ─────────────────────────────────────────────────────────────────────
 
@@ -18,11 +19,11 @@ export default async function AdminPage() {
   const monthStart    = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
 
   // Fetch all data in parallel
-  const [{ data: users }, { data: triageSessions }, { data: orgs }, { data: orgMembers }] =
+  const [{ data: users }, { data: triageSessions }, { data: orgs }, { data: orgMembers }, { data: rawInvites }] =
     await Promise.all([
       supabaseAdmin
         .from('users')
-        .select('id, email, name, plan_tier, org_role, created_at, admin_notes, suspended_at, stripe_customer_id')
+        .select('id, email, name, plan_tier, org_role, created_at, admin_notes, suspended_at, stripe_customer_id, last_seen_at')
         .order('created_at', { ascending: false }),
 
       supabaseAdmin
@@ -39,6 +40,13 @@ export default async function AdminPage() {
         .from('org_members')
         .select('id, org_id, user_id, role')
         .eq('status', 'active'),
+
+      // Pending + expired invites (not yet accepted)
+      supabaseAdmin
+        .from('org_invites')
+        .select('id, org_id, email, role, created_at, expires_at, invited_by')
+        .is('accepted_at', null)
+        .order('created_at', { ascending: false }),
     ]);
 
   // ── triage map ────────────────────────────────────────────────────────────
@@ -77,8 +85,31 @@ export default async function AdminPage() {
     const initials  = name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
     const isActive  = triage && triage.lastDate >= thirtyDaysAgo;
     const status: UserRow['status'] = isActive ? 'active' : triage ? 'inactive' : 'never';
-    return { id: u.id, email: u.email, name, initials, plan, org_role: u.org_role, created_at: u.created_at, admin_notes: u.admin_notes ?? null, suspended_at: u.suspended_at ?? null, stripe_customer_id: u.stripe_customer_id ?? null, triage, status };
+    return {
+      id: u.id, email: u.email, name, initials, plan, org_role: u.org_role,
+      created_at: u.created_at, admin_notes: u.admin_notes ?? null,
+      suspended_at: u.suspended_at ?? null, stripe_customer_id: u.stripe_customer_id ?? null,
+      last_seen_at: u.last_seen_at ?? null,
+      triage, status,
+    };
   });
+
+  // ── invite rows ───────────────────────────────────────────────────────────
+  const orgById     = new Map((orgs ?? []).map((o) => [o.id, o]));
+  const userEmailById = new Map(allUsers.map((u) => [u.id, u.email]));
+  const now         = new Date().toISOString();
+
+  const inviteRows: InviteRow[] = (rawInvites ?? []).map((inv) => ({
+    id:             inv.id,
+    orgId:          inv.org_id,
+    orgName:        orgById.get(inv.org_id)?.name ?? '(unknown org)',
+    email:          inv.email,
+    role:           inv.role ?? 'member',
+    invitedByEmail: userEmailById.get(inv.invited_by) ?? '(unknown)',
+    createdAt:      inv.created_at,
+    expiresAt:      inv.expires_at,
+    isExpired:      inv.expires_at < now,
+  }));
 
   // ── org rows ──────────────────────────────────────────────────────────────
   const userById = new Map(allUsers.map((u) => [u.id, u]));
@@ -148,8 +179,8 @@ export default async function AdminPage() {
         ))}
       </div>
 
-      {/* Tabs: Users / Organizations */}
-      <AdminTabs userRows={userRows} orgRows={orgRows} />
+      {/* Tabs: Users / Organizations / Invites */}
+      <AdminTabs userRows={userRows} orgRows={orgRows} inviteRows={inviteRows} />
     </div>
   );
 }

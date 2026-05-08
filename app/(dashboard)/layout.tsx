@@ -1,10 +1,12 @@
 import { SessionProvider } from 'next-auth/react';
-import { auth } from '@/auth';
-import { redirect } from 'next/navigation';
-import { Sidebar } from '@/components/nav/sidebar';
-import { Header } from '@/components/nav/header';
-import { Toaster } from '@/components/ui/sonner';
+import { auth }            from '@/auth';
+import { redirect }        from 'next/navigation';
+import { after }           from 'next/server';
+import { Sidebar }             from '@/components/nav/sidebar';
+import { Header }              from '@/components/nav/header';
+import { Toaster }             from '@/components/ui/sonner';
 import { ImpersonationBanner } from '@/components/impersonation-banner';
+import { supabaseAdmin }       from '@/lib/supabase';
 
 export default async function DashboardLayout({
   children,
@@ -13,6 +15,18 @@ export default async function DashboardLayout({
 }) {
   const session = await auth();
   if (!session) redirect('/login');
+
+  // Update last_seen_at after the response is sent — does not block rendering.
+  // Skip when a super admin is impersonating so we don't touch the target
+  // user's record just because an admin is browsing their account.
+  if (!session.user.impersonating) {
+    after(async () => {
+      await supabaseAdmin
+        .from('users')
+        .update({ last_seen_at: new Date().toISOString() })
+        .eq('id', session.user.id);
+    });
+  }
 
   return (
     <SessionProvider session={session}>

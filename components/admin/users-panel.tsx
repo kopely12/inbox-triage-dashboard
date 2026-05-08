@@ -28,6 +28,7 @@ export type UserRow = {
   admin_notes:        string | null;
   suspended_at:       string | null;
   stripe_customer_id: string | null;
+  last_seen_at:       string | null;
   triage:             { count: number; lastDate: string } | undefined;
   status:             'active' | 'inactive' | 'never';
 };
@@ -48,13 +49,14 @@ function relDate(iso: string) {
 }
 
 function exportCSV(rows: UserRow[]) {
-  const headers = ['Name', 'Email', 'Plan', 'Role', 'Joined', 'Triages', 'Last Triage', 'Status', 'Suspended', 'Notes'];
+  const headers = ['Name', 'Email', 'Plan', 'Role', 'Joined', 'Last Seen', 'Triages', 'Last Triage', 'Status', 'Suspended', 'Notes'];
   const lines = rows.map((r) => [
     `"${r.name.replace(/"/g, '""')}"`,
     `"${r.email}"`,
     r.plan,
     r.org_role ?? 'member',
     r.created_at.slice(0, 10),
+    r.last_seen_at?.slice(0, 10) ?? '',
     String(r.triage?.count ?? 0),
     r.triage?.lastDate.slice(0, 10) ?? '',
     r.status,
@@ -128,6 +130,7 @@ export function UsersPanel({ rows }: { rows: UserRow[] }) {
               <TableHead>Plan</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Joined</TableHead>
+              <TableHead>Last seen</TableHead>
               <TableHead>Last triage</TableHead>
               <TableHead className="text-right">Triages</TableHead>
               <TableHead>Status</TableHead>
@@ -138,7 +141,7 @@ export function UsersPanel({ rows }: { rows: UserRow[] }) {
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-center py-10 text-sm text-muted-foreground">
+                <TableCell colSpan={10} className="text-center py-10 text-sm text-muted-foreground">
                   {search ? 'No users match your search.' : 'No users yet.'}
                 </TableCell>
               </TableRow>
@@ -178,6 +181,10 @@ export function UsersPanel({ rows }: { rows: UserRow[] }) {
 
                   <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                     {fmtDate(row.created_at)}
+                  </TableCell>
+
+                  <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                    {row.last_seen_at ? relDate(row.last_seen_at) : '—'}
                   </TableCell>
 
                   <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
