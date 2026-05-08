@@ -39,7 +39,7 @@ export function AdminTabs({ userRows, orgRows }: { userRows: UserRow[]; orgRows:
       </div>
 
       {tab === 'users' && <UsersPanel rows={userRows} />}
-      {tab === 'orgs'  && <OrgsTable  orgs={orgRows}  />}
+      {tab === 'orgs'  && <OrgsTable  orgs={orgRows} userRows={userRows} />}
     </div>
   );
 }

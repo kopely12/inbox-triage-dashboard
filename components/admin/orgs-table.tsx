@@ -8,9 +8,11 @@ import {
 } from '@/components/ui/table';
 import { OrgBillingModal }        from '@/components/admin/org-billing-modal';
 import { MemberManagementModal }  from '@/components/admin/member-management-modal';
-import { Search, Users, Settings2 } from 'lucide-react';
+import { CreateOrgModal }         from '@/components/admin/create-org-modal';
+import { Search, Users, Settings2, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { OrgRow } from '@/components/admin/orgs-panel';
+import type { UserRow } from '@/components/admin/users-panel';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -41,14 +43,18 @@ function StatusBadge({ status }: { status: string }) {
 
 type ModalState =
   | { kind: 'none' }
+  | { kind: 'create' }
   | { kind: 'members'; org: OrgRow }
   | { kind: 'billing'; org: OrgRow };
 
 // ─── component ────────────────────────────────────────────────────────────────
 
-export function OrgsTable({ orgs }: { orgs: OrgRow[] }) {
+export function OrgsTable({ orgs, userRows }: { orgs: OrgRow[]; userRows: UserRow[] }) {
   const [search, setSearch]     = useState('');
   const [modal, setModal]       = useState<ModalState>({ kind: 'none' });
+
+  // Users eligible to become org owners: not in an org, not suspended
+  const eligibleOwners = userRows.filter((u) => !u.org_role && !u.suspended_at);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -79,6 +85,14 @@ export function OrgsTable({ orgs }: { orgs: OrgRow[] }) {
             {filtered.length}{filtered.length !== orgs.length ? ` of ${orgs.length}` : ''}{' '}
             org{orgs.length !== 1 ? 's' : ''}
           </span>
+          <div className="flex-1" />
+          <button
+            onClick={() => setModal({ kind: 'create' })}
+            className="flex items-center gap-1.5 h-8 px-3 rounded-md border border-input bg-background text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            New organization
+          </button>
         </div>
 
         {/* Table */}
@@ -176,6 +190,15 @@ export function OrgsTable({ orgs }: { orgs: OrgRow[] }) {
           </Table>
         </div>
       </div>
+
+      {/* Create org modal */}
+      {modal.kind === 'create' && (
+        <CreateOrgModal
+          open
+          onClose={closeModal}
+          eligibleOwners={eligibleOwners}
+        />
+      )}
 
       {/* Member management modal */}
       {modal.kind === 'members' && (

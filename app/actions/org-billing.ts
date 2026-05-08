@@ -28,6 +28,57 @@ async function requireOrgAdmin(orgId: string) {
   return session;
 }
 
+// ─── admin: create org ────────────────────────────────────────────────────────
+
+export async function createOrg(fields: {
+  name:            string;
+  ownerId:         string;
+  seatCount:       number;
+  billingEmail:    string;
+  billingProvider: string;
+  billingAmount:   number | null;
+}) {
+  await requireSuperAdmin();
+
+  const { data: owner } = await supabaseAdmin
+    .from('users')
+    .select('id, org_id, email')
+    .eq('id', fields.ownerId)
+    .single();
+
+  if (!owner) throw new Error('User not found');
+  if (owner.org_id) throw new Error('That user is already in an organization');
+
+  const { data: org, error } = await supabaseAdmin
+    .from('organizations')
+    .insert({
+      name:                fields.name.trim(),
+      owner_id:            fields.ownerId,
+      seat_count:          fields.seatCount,
+      billing_email:       fields.billingEmail.trim() || null,
+      billing_provider:    fields.billingProvider,
+      billing_amount:      fields.billingAmount,
+      subscription_status: 'active',
+    })
+    .select('id')
+    .single();
+
+  if (error || !org) throw new Error(error?.message ?? 'Failed to create organization');
+
+  await Promise.all([
+    supabaseAdmin.from('org_members').insert({
+      org_id:  org.id,
+      user_id: fields.ownerId,
+      role:    'owner',
+      status:  'active',
+    }),
+    supabaseAdmin.from('users').update({ org_id: org.id, org_role: 'owner' }).eq('id', fields.ownerId),
+  ]);
+
+  revalidatePath('/admin');
+  return { success: true };
+}
+
 // ─── admin: save org billing (super-admin only) ───────────────────────────────
 
 export type OrgBillingFields = {
