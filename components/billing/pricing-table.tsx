@@ -1,16 +1,18 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { createProCheckoutUrl, createPortalUrl } from '@/app/actions/billing';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Check, Minus, Zap } from 'lucide-react';
+import { Check, Minus, Zap, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
-type PlanId      = 'free' | 'pro' | 'team';
-type PlanType    = 'individual' | 'team';
+type PlanId       = 'free' | 'pro' | 'team';
+type PlanType     = 'individual' | 'team';
 type BillingCycle = 'monthly' | 'annual';
 
 type Feature = { label: string; value: string | boolean };
@@ -18,11 +20,12 @@ type Feature = { label: string; value: string | boolean };
 type Plan = {
   id:                 PlanId;
   name:               string;
-  monthlyPrice:       number;
-  annualMonthly:      number;   // per-month rate when billed annually
-  annualTotal:        number;   // total charged once per year
+  monthlyPrice:       number | null;   // null = variable (team)
+  annualMonthly:      number | null;
+  annualTotal:        number | null;
   annualSavingsPct:   number;
   description:        string;
+  priceNote:          string | null;   // shown beneath price for variable plans
   featured:           boolean;
   showFor:            PlanType[];
   features:           Feature[];
@@ -39,16 +42,17 @@ const PLANS: Plan[] = [
     annualTotal:      0,
     annualSavingsPct: 0,
     description:      'For individuals just getting started.',
+    priceNote:        null,
     featured:         false,
     showFor:          ['individual'],
     features: [
-      { label: 'Triages per month',    value: '50'        },
-      { label: 'Emails per scan',      value: '20'        },
-      { label: 'Commitment tracking',  value: true        },
-      { label: 'Analytics',            value: 'Basic'     },
-      { label: 'AI draft replies',     value: false       },
-      { label: 'Priority support',     value: false       },
-      { label: 'Data export',          value: false       },
+      { label: 'Triages per month',   value: '50'    },
+      { label: 'Emails per scan',     value: '20'    },
+      { label: 'Commitment tracking', value: true    },
+      { label: 'Analytics',           value: 'Basic' },
+      { label: 'AI draft replies',    value: false   },
+      { label: 'Priority support',    value: false   },
+      { label: 'Data export',         value: false   },
     ],
   },
   {
@@ -59,36 +63,38 @@ const PLANS: Plan[] = [
     annualTotal:      108,
     annualSavingsPct: 25,
     description:      'For power users who live in their inbox.',
+    priceNote:        null,
     featured:         true,
     showFor:          ['individual', 'team'],
     features: [
-      { label: 'Triages per month',    value: 'Unlimited' },
-      { label: 'Emails per scan',      value: '100'       },
-      { label: 'Commitment tracking',  value: true        },
-      { label: 'Analytics',            value: 'Full'      },
-      { label: 'AI draft replies',     value: true        },
-      { label: 'Priority support',     value: true        },
-      { label: 'Data export',          value: true        },
+      { label: 'Triages per month',   value: 'Unlimited' },
+      { label: 'Emails per scan',     value: '100'       },
+      { label: 'Commitment tracking', value: true        },
+      { label: 'Analytics',           value: 'Full'      },
+      { label: 'AI draft replies',    value: true        },
+      { label: 'Priority support',    value: true        },
+      { label: 'Data export',         value: true        },
     ],
   },
   {
     id:               'team',
     name:             'Team',
-    monthlyPrice:     39,
-    annualMonthly:    29,
-    annualTotal:      348,
-    annualSavingsPct: 26,
-    description:      'For teams that need shared visibility.',
+    monthlyPrice:     null,   // volume-based — no single price
+    annualMonthly:    null,
+    annualTotal:      null,
+    annualSavingsPct: 0,
+    description:      'For teams that need shared visibility and controls.',
+    priceNote:        'Volume pricing · 1–4 seats $12, 5–9 $11, 10–24 $10, 25–49 $9, 50+ $8',
     featured:         false,
     showFor:          ['team'],
     features: [
-      { label: 'Triages per month',    value: 'Unlimited' },
-      { label: 'Emails per scan',      value: '100'       },
-      { label: 'Commitment tracking',  value: true        },
-      { label: 'Analytics',            value: 'Full + export' },
-      { label: 'AI draft replies',     value: true        },
-      { label: 'Priority support',     value: true        },
-      { label: 'Up to 20 team members', value: true       },
+      { label: 'Triages per month',       value: 'Unlimited'     },
+      { label: 'Emails per scan',         value: '100'           },
+      { label: 'Commitment tracking',     value: true            },
+      { label: 'Analytics',              value: 'Full + export' },
+      { label: 'AI draft replies',        value: true            },
+      { label: 'Priority support',        value: true            },
+      { label: 'Centralised team billing', value: true           },
     ],
   },
 ];
@@ -121,12 +127,14 @@ function CycleToggle({ value, onChange }: { value: BillingCycle; onChange: (v: B
     <div className="flex items-center gap-2.5 text-sm">
       <button
         onClick={() => onChange('monthly')}
-        className={cn('transition-colors', value === 'monthly' ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}
+        className={cn(
+          'transition-colors',
+          value === 'monthly' ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
+        )}
       >
         Monthly
       </button>
 
-      {/* pill toggle */}
       <button
         role="switch"
         aria-checked={value === 'annual'}
@@ -146,7 +154,10 @@ function CycleToggle({ value, onChange }: { value: BillingCycle; onChange: (v: B
 
       <button
         onClick={() => onChange('annual')}
-        className={cn('flex items-center gap-1.5 transition-colors', value === 'annual' ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}
+        className={cn(
+          'flex items-center gap-1.5 transition-colors',
+          value === 'annual' ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
+        )}
       >
         Annual
         <Badge variant="secondary" className="text-[10px] px-1.5 py-0 text-emerald-600 bg-emerald-50 border-emerald-200">
@@ -161,23 +172,74 @@ function PlanCard({
   plan,
   cycle,
   currentPlan,
-  isFree,
+  stripeCustomerId,
+  loading,
+  onUpgradePro,
+  onDowngradeToFree,
+  onGoToTeam,
 }: {
-  plan:        Plan;
-  cycle:       BillingCycle;
-  currentPlan: PlanId;
-  isFree:      boolean;
+  plan:              Plan;
+  cycle:             BillingCycle;
+  currentPlan:       PlanId;
+  stripeCustomerId:  string | null;
+  loading:           boolean;
+  onUpgradePro:      () => void;
+  onDowngradeToFree: () => void;
+  onGoToTeam:        () => void;
 }) {
   const isCurrent  = plan.id === currentPlan;
-  const price      = plan.monthlyPrice === 0 ? 0 : (cycle === 'annual' ? plan.annualMonthly : plan.monthlyPrice);
   const planRank: Record<PlanId, number> = { free: 0, pro: 1, team: 2 };
   const isUpgrade  = planRank[plan.id] > planRank[currentPlan];
   const isDowngrade = planRank[plan.id] < planRank[currentPlan];
 
-  function handleCTA() {
-    toast('Billing coming soon', {
-      description: "We'll notify you when upgrade options are available.",
-    });
+  // Price display
+  const price = plan.monthlyPrice === null
+    ? null
+    : plan.monthlyPrice === 0
+      ? 0
+      : cycle === 'annual' ? plan.annualMonthly : plan.monthlyPrice;
+
+  // CTA button
+  let cta: React.ReactNode;
+  if (isCurrent) {
+    cta = (
+      <Button variant="outline" size="sm" className="w-full" disabled>
+        Current plan
+      </Button>
+    );
+  } else if (plan.id === 'team') {
+    // Team requires org setup — always send to team page
+    cta = (
+      <Button variant="outline" size="sm" className="w-full gap-1.5" onClick={onGoToTeam} disabled={loading}>
+        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+        {isUpgrade ? 'Set up a team' : 'Go to team billing'}
+      </Button>
+    );
+  } else if (plan.id === 'pro' && isUpgrade) {
+    cta = (
+      <Button size="sm" className="w-full gap-1.5" onClick={onUpgradePro} disabled={loading}>
+        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+        Upgrade to Pro
+      </Button>
+    );
+  } else if (plan.id === 'free' && isDowngrade) {
+    // Downgrade — send to portal if Stripe customer, otherwise contact support
+    cta = stripeCustomerId ? (
+      <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={onDowngradeToFree} disabled={loading}>
+        {loading && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />}
+        Downgrade to Free
+      </Button>
+    ) : (
+      <Button variant="ghost" size="sm" className="w-full text-muted-foreground" disabled>
+        Contact support to downgrade
+      </Button>
+    );
+  } else {
+    cta = (
+      <Button size="sm" className="w-full" onClick={onUpgradePro} disabled={loading}>
+        Get started
+      </Button>
+    );
   }
 
   return (
@@ -202,7 +264,18 @@ function PlanCard({
         </div>
 
         <div>
-          {plan.monthlyPrice === 0 ? (
+          {price === null ? (
+            // Variable pricing (Team)
+            <div className="space-y-0.5">
+              <div className="flex items-baseline gap-1">
+                <span className="text-3xl font-bold">$8</span>
+                <span className="text-sm text-muted-foreground">– $12 / seat / mo</span>
+              </div>
+              {plan.priceNote && (
+                <p className="text-[11px] text-muted-foreground leading-snug">{plan.priceNote}</p>
+              )}
+            </div>
+          ) : price === 0 ? (
             <div className="flex items-baseline gap-1">
               <span className="text-3xl font-bold">$0</span>
               <span className="text-sm text-muted-foreground">forever</span>
@@ -213,11 +286,11 @@ function PlanCard({
                 <span className="text-3xl font-bold">${price}</span>
                 <span className="text-sm text-muted-foreground">/ month</span>
               </div>
-              {cycle === 'annual' && (
+              {cycle === 'annual' && plan.annualTotal !== null && (
                 <p className="text-xs text-muted-foreground">
                   ${plan.annualTotal} billed annually
                   <span className="ml-1.5 text-emerald-600 font-medium">
-                    (save ${plan.monthlyPrice * 12 - plan.annualTotal}/yr)
+                    (save ${(plan.monthlyPrice! * 12) - plan.annualTotal}/yr)
                   </span>
                 </p>
               )}
@@ -248,40 +321,63 @@ function PlanCard({
       </ul>
 
       {/* CTA */}
-      {isCurrent ? (
-        <Button variant="outline" size="sm" className="w-full" disabled>
-          Current plan
-        </Button>
-      ) : plan.id === 'team' && isFree ? (
-        <Button variant="outline" size="sm" className="w-full" onClick={handleCTA}>
-          Contact us
-        </Button>
-      ) : isUpgrade ? (
-        <Button size="sm" className="w-full gap-1.5" onClick={handleCTA}>
-          <Zap className="w-3.5 h-3.5" />
-          Upgrade to {plan.name}
-        </Button>
-      ) : isDowngrade ? (
-        <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={handleCTA}>
-          Downgrade to {plan.name}
-        </Button>
-      ) : (
-        <Button size="sm" className="w-full" onClick={handleCTA}>
-          Get started
-        </Button>
-      )}
+      {cta}
     </div>
   );
 }
 
 // ─── main export ──────────────────────────────────────────────────────────────
 
-export function PricingTable({ currentPlan }: { currentPlan: PlanId }) {
+export function PricingTable({
+  currentPlan,
+  stripeCustomerId,
+}: {
+  currentPlan:      PlanId;
+  stripeCustomerId: string | null;
+}) {
+  const router = useRouter();
   const [planType, setPlanType] = useState<PlanType>('individual');
   const [cycle,    setCycle]    = useState<BillingCycle>('monthly');
+  const [loading,  setLoading]  = useState<PlanId | null>(null);
 
   const visiblePlans = PLANS.filter((p) => p.showFor.includes(planType));
-  const isFree = currentPlan === 'free';
+
+  async function handleUpgradePro() {
+    setLoading('pro');
+    try {
+      const priceKey = cycle === 'annual' ? 'pro_annual' : 'pro_monthly';
+      const result   = await createProCheckoutUrl(priceKey);
+      if ('error' in result) {
+        toast.error(result.error);
+      } else {
+        window.location.href = result.url;
+      }
+    } catch {
+      toast.error('Something went wrong. Please try again.');
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function handleDowngradeToFree() {
+    setLoading('free');
+    try {
+      const result = await createPortalUrl('user');
+      if ('error' in result) {
+        toast.error(result.error);
+      } else {
+        window.location.href = result.url;
+      }
+    } catch {
+      toast.error('Something went wrong. Please try again.');
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  function handleGoToTeam() {
+    router.push('/team');
+  }
 
   return (
     <div className="space-y-6">
@@ -302,10 +398,27 @@ export function PricingTable({ currentPlan }: { currentPlan: PlanId }) {
             plan={plan}
             cycle={cycle}
             currentPlan={currentPlan}
-            isFree={isFree}
+            stripeCustomerId={stripeCustomerId}
+            loading={loading === plan.id}
+            onUpgradePro={handleUpgradePro}
+            onDowngradeToFree={handleDowngradeToFree}
+            onGoToTeam={handleGoToTeam}
           />
         ))}
       </div>
+
+      {currentPlan !== 'free' && stripeCustomerId && (
+        <p className="text-center text-xs text-muted-foreground">
+          To cancel your subscription, use{' '}
+          <button
+            className="underline underline-offset-2 hover:text-foreground transition-colors"
+            onClick={handleDowngradeToFree}
+          >
+            Manage billing
+          </button>{' '}
+          to access your Stripe portal.
+        </p>
+      )}
     </div>
   );
 }
