@@ -36,6 +36,7 @@ export type OrgBillingFields = {
   subscription_status?:     string;
   current_period_end?:      string | null;
   seat_count?:              number;
+  billing_amount?:          number | null;
   stripe_customer_id?:      string | null;
   stripe_subscription_id?:  string | null;
   custom_notes?:            string | null;

@@ -143,7 +143,16 @@ export async function adminAddToOrg(orgId: string, email: string, role: 'admin' 
     .single();
 
   if (!user) return { error: 'No account found with that email.' };
-  if (user.org_id) return { error: 'User is already in an organization. Remove them first.' };
+
+  if (user.org_id) {
+    const { data: existingOrg } = await supabaseAdmin
+      .from('organizations')
+      .select('name')
+      .eq('id', user.org_id)
+      .single();
+    const orgName = existingOrg?.name ?? 'another organization';
+    return { error: `Already a member of "${orgName}". Remove them from that org first.` };
+  }
 
   const { error } = await supabaseAdmin
     .from('org_members')

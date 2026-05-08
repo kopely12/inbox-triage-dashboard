@@ -38,6 +38,7 @@ export type OrgRow = {
   subscriptionStatus:   string;
   currentPeriodEnd:     string | null;
   seatCount:            number;
+  billingAmount:        number | null;
   stripeCustomerId:     string | null;
   stripeSubscriptionId: string | null;
   customNotes:          string | null;
@@ -271,16 +272,16 @@ function OrgCard({ org }: { org: OrgRow }) {
         onClose={() => setBillingOpen(false)}
         orgId={org.id}
         orgName={org.name}
-        members={org.members}
         initial={{
-          billingEmail:        org.billingEmail        ?? '',
-          billingProvider:     org.billingProvider     ?? 'stripe',
-          subscriptionStatus:  org.subscriptionStatus  ?? 'active',
-          currentPeriodEnd:    org.currentPeriodEnd    ?? '',
-          seatCount:           org.seatCount           ?? 5,
-          stripeCustomerId:    org.stripeCustomerId    ?? '',
+          billingEmail:         org.billingEmail         ?? '',
+          billingProvider:      org.billingProvider      ?? 'stripe',
+          subscriptionStatus:   org.subscriptionStatus   ?? 'active',
+          currentPeriodEnd:     org.currentPeriodEnd     ?? '',
+          seatCount:            org.seatCount            ?? 5,
+          billingAmount:        org.billingAmount != null ? String(org.billingAmount) : '',
+          stripeCustomerId:     org.stripeCustomerId     ?? '',
           stripeSubscriptionId: org.stripeSubscriptionId ?? '',
-          customNotes:         org.customNotes         ?? '',
+          customNotes:          org.customNotes          ?? '',
         }}
       />
     </div>

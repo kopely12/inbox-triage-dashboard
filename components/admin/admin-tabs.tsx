@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { UsersPanel, type UserRow } from '@/components/admin/users-panel';
-import { OrgsPanel,  type OrgRow  } from '@/components/admin/orgs-panel';
+import { OrgsTable }                from '@/components/admin/orgs-table';
+import { type OrgRow }              from '@/components/admin/orgs-panel';
 import { Users, Building2 } from 'lucide-react';
 
 type Tab = 'users' | 'orgs';
@@ -37,9 +38,8 @@ export function AdminTabs({ userRows, orgRows }: { userRows: UserRow[]; orgRows:
         ))}
       </div>
 
-      {/* Panels */}
       {tab === 'users' && <UsersPanel rows={userRows} />}
-      {tab === 'orgs'  && <OrgsPanel  orgs={orgRows}  />}
+      {tab === 'orgs'  && <OrgsTable  orgs={orgRows}  />}
     </div>
   );
 }
