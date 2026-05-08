@@ -172,6 +172,7 @@ function PlanCard({
   plan,
   cycle,
   currentPlan,
+  planType,
   stripeCustomerId,
   loading,
   onUpgradePro,
@@ -181,13 +182,17 @@ function PlanCard({
   plan:              Plan;
   cycle:             BillingCycle;
   currentPlan:       PlanId;
+  planType:          PlanType;
   stripeCustomerId:  string | null;
   loading:           boolean;
   onUpgradePro:      () => void;
   onDowngradeToFree: () => void;
   onGoToTeam:        () => void;
 }) {
-  const isCurrent  = plan.id === currentPlan;
+  // In the Team tab, only highlight 'team' as current — an individual Pro plan
+  // doesn't count as a team membership, so the Pro card shouldn't say "Current plan".
+  const isCurrent  = plan.id === currentPlan &&
+    (planType === 'individual' || currentPlan === 'team');
   const planRank: Record<PlanId, number> = { free: 0, pro: 1, team: 2 };
   const isUpgrade  = planRank[plan.id] > planRank[currentPlan];
   const isDowngrade = planRank[plan.id] < planRank[currentPlan];
@@ -398,6 +403,7 @@ export function PricingTable({
             plan={plan}
             cycle={cycle}
             currentPlan={currentPlan}
+            planType={planType}
             stripeCustomerId={stripeCustomerId}
             loading={loading === plan.id}
             onUpgradePro={handleUpgradePro}
