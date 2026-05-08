@@ -2,23 +2,25 @@
 
 import { useState, useTransition } from 'react';
 import { updateBillingEmail } from '@/app/actions/org-billing';
+import { createTeamCheckoutUrl, createPortalUrl } from '@/app/actions/billing';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { CreditCard, Pencil, Check, X, Loader2, Users } from 'lucide-react';
+import { CreditCard, Pencil, Check, X, Loader2, Users, ExternalLink, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type Props = {
-  orgId:              string;
-  seatCount:          number;
-  activeMemberCount:  number;
-  billingEmail:       string | null;
-  subscriptionStatus: string;
-  currentPeriodEnd:   string | null;
-  billingProvider:    string;
-  isOwner:            boolean;
+  orgId:                string;
+  seatCount:            number;
+  activeMemberCount:    number;
+  billingEmail:         string | null;
+  subscriptionStatus:   string;
+  currentPeriodEnd:     string | null;
+  billingProvider:      string;
+  stripeSubscriptionId: string | null;
+  isOwner:              boolean;
 };
 
 function fmtDate(iso: string) {
@@ -41,14 +43,19 @@ function StatusBadge({ status }: { status: string }) {
 
 export function BillingCard({
   orgId, seatCount, activeMemberCount, billingEmail,
-  subscriptionStatus, currentPeriodEnd, billingProvider, isOwner,
+  subscriptionStatus, currentPeriodEnd, billingProvider,
+  stripeSubscriptionId, isOwner,
 }: Props) {
-  const [editing, setEditing]      = useState(false);
-  const [email, setEmail]          = useState(billingEmail ?? '');
-  const [pending, startTransition] = useTransition();
+  const [editing,  setEditing]      = useState(false);
+  const [email,    setEmail]        = useState(billingEmail ?? '');
+  const [btnLoad,  setBtnLoad]      = useState<string | null>(null);
+  const [pending,  startTransition] = useTransition();
 
   const seatsRemaining = Math.max(0, seatCount - activeMemberCount);
   const seatPct        = seatCount > 0 ? Math.min(1, activeMemberCount / seatCount) : 0;
+
+  // Is there an active Stripe subscription?
+  const hasStripeSubscription = billingProvider === 'stripe' && !!stripeSubscriptionId;
 
   function handleSaveEmail() {
     startTransition(async () => {
@@ -62,10 +69,36 @@ export function BillingCard({
     });
   }
 
-  function handleManageBilling() {
-    toast.info('Stripe billing portal coming soon', {
-      description: "Once Stripe is connected, you'll be able to update payment methods and download invoices here.",
-    });
+  async function handleSubscribe() {
+    setBtnLoad('subscribe');
+    try {
+      const result = await createTeamCheckoutUrl(orgId, seatCount);
+      if ('error' in result) {
+        toast.error(result.error);
+      } else {
+        window.location.href = result.url;
+      }
+    } catch {
+      toast.error('Something went wrong. Please try again.');
+    } finally {
+      setBtnLoad(null);
+    }
+  }
+
+  async function handlePortal() {
+    setBtnLoad('portal');
+    try {
+      const result = await createPortalUrl('org', orgId);
+      if ('error' in result) {
+        toast.error(result.error);
+      } else {
+        window.location.href = result.url;
+      }
+    } catch {
+      toast.error('Something went wrong. Please try again.');
+    } finally {
+      setBtnLoad(null);
+    }
   }
 
   return (
@@ -125,24 +158,41 @@ export function BillingCard({
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEmail(); if (e.key === 'Escape') setEditing(false); }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter')  handleSaveEmail();
+                  if (e.key === 'Escape') setEditing(false);
+                }}
                 placeholder="billing@company.com"
                 className="h-8 text-xs"
                 disabled={pending}
                 autoFocus
               />
-              <button onClick={handleSaveEmail} disabled={pending} className="p-1.5 rounded-md text-emerald-600 hover:bg-emerald-50 transition-colors">
-                {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+              <button
+                onClick={handleSaveEmail}
+                disabled={pending}
+                className="p-1.5 rounded-md text-emerald-600 hover:bg-emerald-50 transition-colors"
+              >
+                {pending
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <Check className="w-3.5 h-3.5" />}
               </button>
-              <button onClick={() => { setEditing(false); setEmail(billingEmail ?? ''); }} className="p-1.5 rounded-md text-muted-foreground hover:bg-accent transition-colors">
+              <button
+                onClick={() => { setEditing(false); setEmail(billingEmail ?? ''); }}
+                className="p-1.5 rounded-md text-muted-foreground hover:bg-accent transition-colors"
+              >
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
           ) : (
             <div className="flex items-center gap-2">
-              <span className="text-sm">{billingEmail || <span className="text-muted-foreground italic">Not set</span>}</span>
+              <span className="text-sm">
+                {billingEmail || <span className="text-muted-foreground italic">Not set</span>}
+              </span>
               {isOwner && (
-                <button onClick={() => setEditing(true)} className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors">
+                <button
+                  onClick={() => setEditing(true)}
+                  className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+                >
                   <Pencil className="w-3 h-3" />
                 </button>
               )}
@@ -150,11 +200,34 @@ export function BillingCard({
           )}
         </div>
 
-        {/* Manage billing CTA */}
-        {isOwner && (
-          <Button variant="outline" size="sm" className="w-full" onClick={handleManageBilling}>
-            Manage billing
-          </Button>
+        {/* Billing CTA — owner only, Stripe only */}
+        {isOwner && billingProvider === 'stripe' && (
+          hasStripeSubscription ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full gap-1.5"
+              onClick={handlePortal}
+              disabled={btnLoad !== null}
+            >
+              {btnLoad === 'portal'
+                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                : <ExternalLink className="w-3.5 h-3.5" />}
+              Manage billing
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              className="w-full gap-1.5"
+              onClick={handleSubscribe}
+              disabled={btnLoad !== null}
+            >
+              {btnLoad === 'subscribe'
+                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                : <Zap className="w-3.5 h-3.5" />}
+              Subscribe — {seatCount} seat{seatCount !== 1 ? 's' : ''}
+            </Button>
+          )
         )}
       </CardContent>
     </Card>

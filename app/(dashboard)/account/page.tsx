@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import { EditName } from '@/components/account/edit-name';
+import { AccountBillingSection } from '@/components/account/account-billing-section';
 import { PreferencesForm } from '@/components/settings/preferences-form';
 import { OrgNameForm } from '@/components/settings/org-name-form';
 import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog';
@@ -90,6 +91,12 @@ export default async function AccountPage() {
           </dl>
         </CardContent>
       </Card>
+
+      {/* Billing */}
+      <AccountBillingSection
+        plan={plan}
+        stripeCustomerId={user?.stripe_customer_id ?? null}
+      />
 
       {/* Preferences */}
       <Card>

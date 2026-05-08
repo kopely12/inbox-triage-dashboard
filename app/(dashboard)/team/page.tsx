@@ -44,7 +44,7 @@ export default async function TeamPage() {
 
       supabaseAdmin
         .from('organizations')
-        .select('name, seat_count, billing_email, subscription_status, current_period_end, billing_provider')
+        .select('name, seat_count, billing_email, subscription_status, current_period_end, billing_provider, stripe_subscription_id')
         .eq('id', orgId)
         .single(),
     ]);
@@ -104,6 +104,7 @@ export default async function TeamPage() {
           subscriptionStatus={orgBilling.subscription_status ?? 'active'}
           currentPeriodEnd={orgBilling.current_period_end ?? null}
           billingProvider={orgBilling.billing_provider ?? 'stripe'}
+          stripeSubscriptionId={orgBilling.stripe_subscription_id ?? null}
           isOwner={isOwner}
         />
       )}
