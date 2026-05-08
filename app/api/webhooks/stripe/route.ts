@@ -57,8 +57,11 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
 
   const sub       = await stripe!.subscriptions.retrieve(subscriptionId);
   const status    = sub.status;
-  const periodEnd = new Date(sub.current_period_end * 1000).toISOString();
-  const quantity  = sub.items.data[0]?.quantity ?? 1;
+  const item      = sub.items.data[0];
+  const periodEnd = item?.current_period_end
+    ? new Date(item.current_period_end * 1000).toISOString()
+    : null;
+  const quantity  = item?.quantity ?? 1;
 
   if (userId) {
     // Individual Pro subscription
@@ -100,8 +103,11 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
 async function handleSubscriptionUpdated(sub: Stripe.Subscription) {
   const { userId, orgId } = sub.metadata ?? {};
   const status    = sub.status;
-  const periodEnd = new Date(sub.current_period_end * 1000).toISOString();
-  const quantity  = sub.items.data[0]?.quantity ?? 1;
+  const item      = sub.items.data[0];
+  const periodEnd = item?.current_period_end
+    ? new Date(item.current_period_end * 1000).toISOString()
+    : null;
+  const quantity  = item?.quantity ?? 1;
 
   if (userId) {
     // Sync plan tier with subscription status
@@ -157,10 +163,14 @@ async function handleSubscriptionDeleted(sub: Stripe.Subscription) {
 }
 
 async function handlePaymentFailed(invoice: Stripe.Invoice) {
-  if (!invoice.subscription) return;
+  // In the dahlia API, subscription moved to invoice.parent.subscription_details.subscription
+  const subRef = invoice.parent?.subscription_details?.subscription;
+  if (!subRef) return;
+
+  const subscriptionId = typeof subRef === 'string' ? subRef : subRef.id;
 
   // Retrieve the subscription to get metadata
-  const sub = await stripe!.subscriptions.retrieve(invoice.subscription as string);
+  const sub = await stripe!.subscriptions.retrieve(subscriptionId);
   const { orgId } = sub.metadata ?? {};
 
   if (orgId) {
