@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { supabaseAdmin } from '@/lib/supabase';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Users, UserCheck, Zap, CalendarPlus, Activity } from 'lucide-react';
+import { Users, UserCheck, Zap, CalendarPlus, Activity, Building2 } from 'lucide-react';
 import { AdminTabs }            from '@/components/admin/admin-tabs';
 import { AnnouncementManager }  from '@/components/admin/announcement-manager';
 import type { UserRow }           from '@/components/admin/users-panel';
@@ -92,20 +92,30 @@ export default async function AdminPage() {
   // ── stat tiles ────────────────────────────────────────────────────────────
   const totalUsers   = allUsers.length;
   const freeUsers    = allUsers.filter((u) => !u.plan_tier || u.plan_tier === 'free').length;
-  const proUsers     = allUsers.filter((u) => u.plan_tier === 'pro' || u.plan_tier === 'team').length;
+  const proOnlyUsers = allUsers.filter((u) => u.plan_tier === 'pro').length;
+  const teamUsers    = allUsers.filter((u) => u.plan_tier === 'team').length;
+  const teamCount    = (orgs ?? []).length;
   const newThisMonth = allUsers.filter((u) => u.created_at >= monthStart).length;
   const activeUsers  = allUsers.filter((u) => {
     const t = triageMap.get(u.id);
     return t && t.lastDate >= thirtyDaysAgo;
   }).length;
 
-  const tiles = [
+  const tiles: { label: string; value: number; sublabel?: string; icon: React.ElementType }[] = [
     { label: 'Total users',      value: totalUsers,   icon: Users        },
-    { label: 'Free plan',        value: freeUsers,    icon: UserCheck    },
-    { label: 'Pro / Team',       value: proUsers,     icon: Zap          },
+    { label: 'Free',             value: freeUsers,    icon: UserCheck    },
+    { label: 'Pro',              value: proOnlyUsers, icon: Zap          },
+    { label: 'Teams',            value: teamCount,    icon: Building2,   sublabel: `${teamUsers} user${teamUsers !== 1 ? 's' : ''}` },
     { label: 'Active (30 days)', value: activeUsers,  icon: Activity     },
     { label: 'New this month',   value: newThisMonth, icon: CalendarPlus },
   ];
+
+  // ── org name lookup (used in user rows) ──────────────────────────────────
+  const orgNameByUserId = new Map<string, string>();
+  for (const member of (orgMembers ?? [])) {
+    const orgName = (orgs ?? []).find((o) => o.id === member.org_id)?.name;
+    if (orgName) orgNameByUserId.set(member.user_id, orgName);
+  }
 
   // ── user rows ─────────────────────────────────────────────────────────────
   const userRows: UserRow[] = allUsers.map((u) => {
@@ -120,6 +130,7 @@ export default async function AdminPage() {
       created_at: u.created_at, admin_notes: u.admin_notes ?? null,
       suspended_at: u.suspended_at ?? null, stripe_customer_id: u.stripe_customer_id ?? null,
       last_seen_at: u.last_seen_at ?? null, comped_until: u.comped_until ?? null,
+      orgName: orgNameByUserId.get(u.id) ?? null,
       triage, status,
     };
   });
@@ -198,13 +209,18 @@ export default async function AdminPage() {
       <AnnouncementManager current={currentAnnouncement} />
 
       {/* Stat tiles */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-        {tiles.map(({ label, value, icon: Icon }) => (
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+        {tiles.map(({ label, value, sublabel, icon: Icon }) => (
           <Card key={label}>
             <CardContent className="pt-5 pb-4">
               <div className="flex flex-col gap-2">
                 <Icon className="w-4 h-4 text-muted-foreground" />
-                <p className="text-2xl font-bold">{value}</p>
+                <div>
+                  <p className="text-2xl font-bold leading-none">{value}</p>
+                  {sublabel && (
+                    <p className="text-xs text-muted-foreground mt-0.5">{sublabel}</p>
+                  )}
+                </div>
                 <p className="text-xs text-muted-foreground leading-tight">{label}</p>
               </div>
             </CardContent>

@@ -5,10 +5,9 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
+// Note: AccountBillingSection moved to /billing page; OrgNameForm moved to /team page
 import { EditName } from '@/components/account/edit-name';
-import { AccountBillingSection } from '@/components/account/account-billing-section';
 import { PreferencesForm } from '@/components/settings/preferences-form';
-import { OrgNameForm } from '@/components/settings/org-name-form';
 import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog';
 import { Download } from 'lucide-react';
 import Link from 'next/link';
@@ -16,21 +15,12 @@ import Link from 'next/link';
 export default async function AccountPage() {
   const session = await auth();
   const userId  = session!.user.id;
-  const role    = session!.user.orgRole;
-  const isAdmin = role === 'admin' || role === 'owner';
 
-  const [{ data: user }, { data: membership }] = await Promise.all([
-    supabaseAdmin.from('users').select('*').eq('id', userId).single(),
-
-    isAdmin
-      ? supabaseAdmin
-          .from('org_members')
-          .select('org_id, organizations(name)')
-          .eq('user_id', userId)
-          .eq('status', 'active')
-          .single()
-      : Promise.resolve({ data: null }),
-  ]);
+  const { data: user } = await supabaseAdmin
+    .from('users')
+    .select('*')
+    .eq('id', userId)
+    .single();
 
   const name     = user?.name ?? session!.user.name ?? '—';
   const email    = user?.email ?? session!.user.email ?? '—';
@@ -42,7 +32,6 @@ export default async function AccountPage() {
 
   const timezone           = user?.timezone            ?? 'UTC';
   const defaultSnoozeHours = user?.default_snooze_hours ?? 24;
-  const orgName            = (membership?.organizations as any)?.name ?? '';
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -92,12 +81,6 @@ export default async function AccountPage() {
         </CardContent>
       </Card>
 
-      {/* Billing */}
-      <AccountBillingSection
-        plan={plan}
-        stripeCustomerId={user?.stripe_customer_id ?? null}
-      />
-
       {/* Preferences */}
       <Card>
         <CardHeader className="pb-4">
@@ -108,19 +91,6 @@ export default async function AccountPage() {
           <PreferencesForm timezone={timezone} defaultSnoozeHours={defaultSnoozeHours} />
         </CardContent>
       </Card>
-
-      {/* Organization — admin/owner only */}
-      {isAdmin && (
-        <Card>
-          <CardHeader className="pb-4">
-            <CardTitle className="text-sm font-medium">Organization</CardTitle>
-            <CardDescription>Visible to all members of your team.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <OrgNameForm currentName={orgName} />
-          </CardContent>
-        </Card>
-      )}
 
       {/* Danger zone */}
       <Card className="border-destructive/40">

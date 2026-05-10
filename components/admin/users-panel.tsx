@@ -31,6 +31,7 @@ export type UserRow = {
   stripe_customer_id: string | null;
   last_seen_at:       string | null;
   comped_until:       string | null;
+  orgName:            string | null;
   triage:             { count: number; lastDate: string } | undefined;
   status:             'active' | 'inactive' | 'never';
 };
@@ -51,12 +52,13 @@ function relDate(iso: string) {
 }
 
 function exportCSV(rows: UserRow[]) {
-  const headers = ['Name', 'Email', 'Plan', 'Comped Until', 'Role', 'Joined', 'Last Seen', 'Triages', 'Last Triage', 'Status', 'Suspended', 'Notes'];
+  const headers = ['Name', 'Email', 'Plan', 'Comped Until', 'Organization', 'Role', 'Joined', 'Last Seen', 'Triages', 'Last Triage', 'Status', 'Suspended', 'Notes'];
   const lines = rows.map((r) => [
     `"${r.name.replace(/"/g, '""')}"`,
     `"${r.email}"`,
     r.plan,
     r.comped_until?.slice(0, 10) ?? '',
+    `"${(r.orgName ?? '').replace(/"/g, '""')}"`,
     r.org_role ?? 'member',
     r.created_at.slice(0, 10),
     r.last_seen_at?.slice(0, 10) ?? '',
@@ -131,6 +133,7 @@ export function UsersPanel({ rows }: { rows: UserRow[] }) {
             <TableRow>
               <TableHead className="pl-5 w-56">User</TableHead>
               <TableHead>Plan</TableHead>
+              <TableHead>Organization</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Joined</TableHead>
               <TableHead>Last seen</TableHead>
@@ -144,7 +147,7 @@ export function UsersPanel({ rows }: { rows: UserRow[] }) {
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="text-center py-10 text-sm text-muted-foreground">
+                <TableCell colSpan={11} className="text-center py-10 text-sm text-muted-foreground">
                   {search ? 'No users match your search.' : 'No users yet.'}
                 </TableCell>
               </TableRow>
@@ -186,6 +189,10 @@ export function UsersPanel({ rows }: { rows: UserRow[] }) {
                         </span>
                       )}
                     </div>
+                  </TableCell>
+
+                  <TableCell className="text-sm text-muted-foreground max-w-[140px] truncate">
+                    {row.orgName ?? <span className="opacity-40">—</span>}
                   </TableCell>
 
                   <TableCell className="text-sm text-muted-foreground capitalize">

@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MembersTable } from '@/components/team/members-table';
 import { InviteModal }  from '@/components/team/invite-modal';
 import { BillingCard }  from '@/components/team/billing-card';
-import { Users } from 'lucide-react';
+import { OrgNameForm }  from '@/components/settings/org-name-form';
+import { Users, Settings2 } from 'lucide-react';
 
 export default async function TeamPage() {
   const session = await auth();
@@ -93,6 +94,21 @@ export default async function TeamPage() {
           />
         </CardContent>
       </Card>
+
+      {/* Organization settings — admin/owner only */}
+      {isAdmin && orgId && (
+        <Card>
+          <CardHeader className="pb-4">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Settings2 className="w-4 h-4 text-muted-foreground" />
+              Organization settings
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <OrgNameForm currentName={orgName} />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Billing card — visible to all org members, editable by owner */}
       {orgId && orgBilling && (
