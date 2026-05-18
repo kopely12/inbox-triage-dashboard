@@ -7,9 +7,10 @@ const OPTIONS = [
   { value: '4w',  label: '4W'  },
   { value: '12w', label: '12W' },
   { value: '6m',  label: '6M'  },
+  { value: 'all', label: 'All' },
 ] as const;
 
-export type Range = '4w' | '12w' | '6m';
+export type Range = '4w' | '12w' | '6m' | 'all';
 
 export function RangeToggle({ current }: { current: Range }) {
   const router = useRouter();

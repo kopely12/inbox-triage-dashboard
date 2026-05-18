@@ -2,6 +2,31 @@ import { auth } from '@/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 import { NextResponse } from 'next/server';
 
+// ── In-process rate limiter ────────────────────────────────────────────────
+// Tracks the timestamps of recent requests per user. Effective on long-lived
+// Node.js servers; resets on cold starts in serverless deployments (acceptable
+// trade-off for a low-frequency data-export endpoint at this scale).
+
+const WINDOW_MS  = 60 * 60 * 1000; // 1 hour
+const MAX_HITS   = 3;               // max downloads per window
+
+const rateMap = new Map<string, number[]>(); // userId → timestamps[]
+
+function isRateLimited(userId: string): { limited: boolean; retryAfterSecs: number } {
+  const now  = Date.now();
+  const hits = (rateMap.get(userId) ?? []).filter((t) => now - t < WINDOW_MS);
+  if (hits.length >= MAX_HITS) {
+    const oldestHit     = Math.min(...hits);
+    const retryAfterMs  = WINDOW_MS - (now - oldestHit);
+    return { limited: true, retryAfterSecs: Math.ceil(retryAfterMs / 1000) };
+  }
+  hits.push(now);
+  rateMap.set(userId, hits);
+  return { limited: false, retryAfterSecs: 0 };
+}
+
+// ── Route handler ──────────────────────────────────────────────────────────
+
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {
@@ -9,6 +34,22 @@ export async function GET() {
   }
 
   const userId = session.user.id;
+
+  const { limited, retryAfterSecs } = isRateLimited(userId);
+  if (limited) {
+    return NextResponse.json(
+      { error: 'Too many requests. You can download your data up to 3 times per hour.' },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(retryAfterSecs),
+          'X-RateLimit-Limit':     String(MAX_HITS),
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset':     String(Math.ceil((Date.now() + retryAfterSecs * 1000) / 1000)),
+        },
+      }
+    );
+  }
 
   const [{ data: user }, { data: commitments }, { data: triageSessions }] =
     await Promise.all([
@@ -31,9 +72,9 @@ export async function GET() {
     ]);
 
   const payload = {
-    exported_at:    new Date().toISOString(),
-    profile:        user,
-    commitments:    commitments    ?? [],
+    exported_at:     new Date().toISOString(),
+    profile:         user,
+    commitments:     commitments     ?? [],
     triage_sessions: triageSessions ?? [],
   };
 
@@ -43,6 +84,7 @@ export async function GET() {
     headers: {
       'Content-Type':        'application/json',
       'Content-Disposition': `attachment; filename="${filename}"`,
+      'Cache-Control':       'no-store',
     },
   });
 }

@@ -25,8 +25,11 @@ export function ActivityChart({ data }: { data: ActivityPoint[] }) {
 
   if (isEmpty) {
     return (
-      <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">
-        No triage sessions in the last 12 weeks.
+      <div className="flex flex-col items-center justify-center h-48 gap-2 text-center px-6">
+        <p className="text-sm font-medium text-foreground">No triage data yet</p>
+        <p className="text-xs text-muted-foreground max-w-xs">
+          Run your first triage session from the Gmail sidebar — each session will appear here as a weekly bar.
+        </p>
       </div>
     );
   }

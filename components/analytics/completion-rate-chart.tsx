@@ -6,24 +6,30 @@ import {
   type ChartConfig,
 } from '@/components/ui/chart';
 
-export type SurfacingPoint = {
+export type CompletionRatePoint = {
   label: string;
-  rate:  number | null; // 0–100, null = no data that week
+  rate:  number | null; // 0–100, null = fewer than 2 commitments that week
 };
 
 const chartConfig = {
-  rate: { label: 'Surfacing rate %', color: 'var(--chart-2)' },
+  rate: { label: 'Completion rate %', color: 'var(--chart-2)' },
 } satisfies ChartConfig;
 
-export function SurfacingRateChart({ data, avgRate }: { data: SurfacingPoint[]; avgRate: number | null }) {
+export function CompletionRateChart({
+  data,
+  avgRate,
+}: {
+  data:    CompletionRatePoint[];
+  avgRate: number | null;
+}) {
   const hasData = data.some((d) => d.rate !== null);
 
   if (!hasData) {
     return (
       <div className="flex flex-col items-center justify-center h-48 gap-2 text-center px-6">
-        <p className="text-sm font-medium text-foreground">No surfacing data yet</p>
+        <p className="text-sm font-medium text-foreground">Not enough data yet</p>
         <p className="text-xs text-muted-foreground max-w-xs">
-          Once you run a triage session, you&apos;ll see what percentage of scanned emails the AI decided were worth your attention.
+          Mark at least 2 commitments as done in a single week to start tracking your completion rate.
         </p>
       </div>
     );
@@ -51,7 +57,7 @@ export function SurfacingRateChart({ data, avgRate }: { data: SurfacingPoint[]; 
         <ChartTooltip
           content={
             <ChartTooltipContent
-              formatter={(value) => [`${Number(value).toFixed(1)}%`, 'Surfacing rate']}
+              formatter={(value) => [`${Number(value).toFixed(0)}%`, 'Completion rate']}
             />
           }
         />
@@ -61,7 +67,7 @@ export function SurfacingRateChart({ data, avgRate }: { data: SurfacingPoint[]; 
             stroke="var(--chart-3)"
             strokeDasharray="4 3"
             strokeWidth={1.5}
-            label={{ value: `Avg ${avgRate.toFixed(1)}%`, position: 'insideTopRight', fontSize: 10, fill: 'var(--chart-3)' }}
+            label={{ value: `Avg ${avgRate}%`, position: 'insideTopRight', fontSize: 10, fill: 'var(--chart-3)' }}
           />
         )}
         <Line

@@ -13,15 +13,19 @@ import {
   BarChart2,
   LogOut,
   Shield,
+  CheckSquare,
+  LayoutDashboard,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 const NAV_ITEMS = [
-  { href: '/account',   label: 'Account',   icon: User,       adminOnly: false },
-  { href: '/analytics', label: 'Analytics', icon: BarChart2,  adminOnly: false },
-  { href: '/billing',   label: 'Billing',   icon: CreditCard, adminOnly: false },
-  { href: '/team',      label: 'Team',      icon: Users,      adminOnly: true  },
+  { href: '/',            label: 'Overview',    icon: LayoutDashboard, adminOnly: false },
+  { href: '/account',     label: 'Account',     icon: User,            adminOnly: false },
+  { href: '/analytics',   label: 'Analytics',   icon: BarChart2,       adminOnly: false },
+  { href: '/commitments', label: 'Commitments', icon: CheckSquare,     adminOnly: false },
+  { href: '/billing',     label: 'Billing',     icon: CreditCard,      adminOnly: false },
+  { href: '/team',        label: 'Team',        icon: Users,           adminOnly: true  },
 ];
 
 export function Sidebar() {

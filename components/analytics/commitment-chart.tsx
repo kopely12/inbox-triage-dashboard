@@ -24,8 +24,11 @@ export function CommitmentChart({ data }: { data: CommitmentPoint[] }) {
 
   if (isEmpty) {
     return (
-      <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">
-        No commitments tracked in the last 12 weeks.
+      <div className="flex flex-col items-center justify-center h-48 gap-2 text-center px-6">
+        <p className="text-sm font-medium text-foreground">No commitments tracked yet</p>
+        <p className="text-xs text-muted-foreground max-w-xs">
+          The extension automatically detects promises you make in emails — run a triage and they&apos;ll appear here once found.
+        </p>
       </div>
     );
   }
