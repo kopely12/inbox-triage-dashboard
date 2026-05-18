@@ -56,7 +56,7 @@ export default async function CommitmentsPage({
   // ── build query ──────────────────────────────────────────────────────────────
   let query = supabaseAdmin
     .from('commitments')
-    .select('id, thread_id, direction, description, status, due_date, scanned_at, resolved_at, counterparty, counterparty_email, priority, note', { count: 'exact' })
+    .select('id, thread_id, direction, description, status, due_date, scanned_at, resolved_at, counterparty, counterparty_email, note', { count: 'exact' })
     .eq('user_id', userId);
 
   if (validDirection !== 'all') query = query.eq('direction', validDirection);
@@ -77,7 +77,7 @@ export default async function CommitmentsPage({
     .order('scanned_at', { ascending: false })
     .range(from, to);
 
-  const { data: rows, count } = await query;
+  const { data: rows, count, error: queryError } = await query;
   const commitments = rows ?? [];
 
   const totalPages  = count ? Math.ceil(count / PAGE_SIZE) : 1;
@@ -188,8 +188,13 @@ export default async function CommitmentsPage({
 
       {/* Table */}
       <Card>
-        {commitments.length === 0 ? (
-          <CardContent className="flex flex-col items-center justify-content py-16 gap-2 text-center">
+        {queryError ? (
+          <CardContent className="flex flex-col items-center justify-center py-16 gap-2 text-center">
+            <p className="text-sm font-medium text-destructive">Failed to load commitments</p>
+            <p className="text-xs text-muted-foreground max-w-xs font-mono">{queryError.message}</p>
+          </CardContent>
+        ) : commitments.length === 0 ? (
+          <CardContent className="flex flex-col items-center justify-center py-16 gap-2 text-center">
             <p className="text-sm font-medium">
               {validStatus === 'open'    ? 'No open commitments' :
                validStatus === 'overdue' ? 'Nothing overdue' :
