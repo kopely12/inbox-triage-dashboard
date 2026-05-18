@@ -194,9 +194,9 @@ export default async function OverviewPage() {
       {/* Quick links */}
       <div className="flex gap-3 flex-wrap">
         <Button asChild variant="default" size="sm" className="gap-1.5">
-          <a href="https://mail.google.com" target="_blank" rel="noopener noreferrer">
+          <a href="https://mail.google.com/?inbox_triage_run=1" target="_blank" rel="noopener noreferrer">
             <Inbox className="w-3.5 h-3.5" />
-            Open Gmail
+            Run Triage
           </a>
         </Button>
         <Button asChild variant="outline" size="sm" className="gap-1.5">
