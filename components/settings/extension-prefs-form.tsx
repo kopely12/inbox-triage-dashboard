@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { saveExtensionPrefs, type ExtensionPrefs, type PriorityRule } from '@/app/actions/extension-prefs';
+import { saveExtensionPrefs } from '@/app/actions/extension-prefs';
+import type { ExtensionPrefs, PriorityRule } from '@/lib/extension-prefs';
 import { Button }  from '@/components/ui/button';
 import { Label }   from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';

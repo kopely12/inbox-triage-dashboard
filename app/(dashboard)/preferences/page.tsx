@@ -3,7 +3,7 @@ import { supabaseAdmin }  from '@/lib/supabase';
 import { redirect }       from 'next/navigation';
 import { Info }           from 'lucide-react';
 import { ExtensionPrefsForm } from '@/components/settings/extension-prefs-form';
-import { PREFS_DEFAULTS, type ExtensionPrefs } from '@/app/actions/extension-prefs';
+import { PREFS_DEFAULTS, type ExtensionPrefs } from '@/lib/extension-prefs';
 
 export const metadata = { title: 'Preferences — Inbox Triage' };
 
