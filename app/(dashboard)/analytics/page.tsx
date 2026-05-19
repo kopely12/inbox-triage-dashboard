@@ -359,13 +359,14 @@ export default async function AnalyticsPage({
   const senderMapInternal = new Map<string, {
     email: string; name: string | null;
     open: number; done: number; openFirst: number; openSecond: number;
+    lastDate: string | null;
   }>();
 
   (senderRaw ?? []).forEach((c: any) => {
     const email = (c.counterparty_email || '').toLowerCase().trim();
     if (!email) return;
     if (!senderMapInternal.has(email)) {
-      senderMapInternal.set(email, { email, name: c.counterparty || null, open: 0, done: 0, openFirst: 0, openSecond: 0 });
+      senderMapInternal.set(email, { email, name: c.counterparty || null, open: 0, done: 0, openFirst: 0, openSecond: 0, lastDate: null });
     }
     const row = senderMapInternal.get(email)!;
     if (c.status === 'open') {
@@ -374,16 +375,16 @@ export default async function AnalyticsPage({
       else                            row.openSecond += 1;
     }
     if (c.status === 'done') row.done += 1;
+    // Track most recent commitment date for this sender
+    if (!row.lastDate || c.scanned_at > row.lastDate) row.lastDate = c.scanned_at;
   });
 
   const topSenders: SenderRow[] = [...senderMapInternal.values()]
     .sort((a, b) => (b.open + b.done) - (a.open + a.done))
     .slice(0, 10)
     .map((row) => {
-      const total       = row.open + row.done;
-      const fulfillment = total > 0 ? row.done / total : 1;
-      // Health based on open count relative to total volume, not raw threshold
-      const openRatio   = total > 0 ? row.open / total : 0;
+      const total     = row.open + row.done;
+      const openRatio = total > 0 ? row.open / total : 0;
       const health: SenderRow['health'] =
         openRatio > 0.6 || row.open >= 5 ? 'red' :
         openRatio > 0.3 || row.open >= 2 ? 'yellow' :
@@ -391,7 +392,7 @@ export default async function AnalyticsPage({
       const trend: SenderRow['trend'] =
         row.openSecond > row.openFirst + 1 ? 'up' :
         row.openFirst  > row.openSecond + 1 ? 'down' : 'flat';
-      return { email: row.email, name: row.name, open: row.open, done: row.done, health, trend };
+      return { email: row.email, name: row.name, open: row.open, done: row.done, health, trend, lastDate: row.lastDate };
     });
 
   // ── Overview tiles (range-aware) ───────────────────────────────────────────

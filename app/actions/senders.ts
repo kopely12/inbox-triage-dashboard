@@ -30,6 +30,7 @@ export async function pinSender(formData: FormData): Promise<void> {
     });
 
   if (error) { console.error('[pinSender]', error.message); return; }
+  revalidatePath('/senders');
   revalidatePath('/settings');
 }
 
@@ -55,6 +56,7 @@ export async function suppressSender(formData: FormData): Promise<void> {
     });
 
   if (error) { console.error('[suppressSender]', error.message); return; }
+  revalidatePath('/senders');
   revalidatePath('/settings');
 }
 
@@ -77,5 +79,6 @@ export async function clearSenderRule(formData: FormData): Promise<void> {
 
   const { error } = await query;
   if (error) { console.error('[clearSenderRule]', error.message); return; }
+  revalidatePath('/senders');
   revalidatePath('/settings');
 }
