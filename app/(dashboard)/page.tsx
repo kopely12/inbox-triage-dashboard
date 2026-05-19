@@ -7,9 +7,10 @@ import {
 } from '@/components/ui/card';
 import { Badge }   from '@/components/ui/badge';
 import { Button }  from '@/components/ui/button';
+import { MarkDoneButton } from '@/components/commitments/commitment-row-actions';
 import {
   CheckSquare, Clock, AlertTriangle, ArrowUpRight,
-  Inbox, ExternalLink, BarChart2, Zap,
+  Inbox, ExternalLink, BarChart2, Zap, CalendarDays, Timer,
 } from 'lucide-react';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -29,14 +30,17 @@ function relativeTime(iso: string): string {
 function extensionHealth(lastTriageAt: string | null): {
   label: string; detail: string; variant: 'default' | 'secondary' | 'destructive' | 'outline';
 } {
-  if (!lastTriageAt) {
-    return { label: 'Not connected', detail: 'No triage sessions found', variant: 'outline' };
-  }
+  if (!lastTriageAt) return { label: 'Not connected', detail: 'No triage sessions found', variant: 'outline' };
   const daysAgo = (Date.now() - new Date(lastTriageAt).getTime()) / 86_400_000;
-  if (daysAgo < 1)  return { label: 'Active',         detail: `Last triage ${relativeTime(lastTriageAt)}`,      variant: 'default' };
-  if (daysAgo < 3)  return { label: 'Recent',         detail: `Last triage ${relativeTime(lastTriageAt)}`,      variant: 'secondary' };
-  if (daysAgo < 7)  return { label: 'Idle',           detail: `Last triage ${Math.round(daysAgo)}d ago`,         variant: 'secondary' };
-  return               { label: 'Inactive',         detail: `Last triage ${Math.round(daysAgo)}d ago`,         variant: 'destructive' };
+  if (daysAgo < 1) return { label: 'Active',   detail: `Last triage ${relativeTime(lastTriageAt)}`,    variant: 'default' };
+  if (daysAgo < 3) return { label: 'Recent',   detail: `Last triage ${relativeTime(lastTriageAt)}`,    variant: 'secondary' };
+  if (daysAgo < 7) return { label: 'Idle',     detail: `Last triage ${Math.round(daysAgo)}d ago`,      variant: 'secondary' };
+  return               { label: 'Inactive', detail: `Last triage ${Math.round(daysAgo)}d ago`,      variant: 'destructive' };
+}
+
+function gmailThreadUrl(threadId: string | null) {
+  if (!threadId || threadId.startsWith('compose_') || threadId.startsWith('manual_')) return null;
+  return `https://mail.google.com/mail/u/0/#all/${threadId}`;
 }
 
 // ─── page ─────────────────────────────────────────────────────────────────────
@@ -46,20 +50,43 @@ export default async function OverviewPage() {
   if (!session?.user?.id) redirect('/login');
   const userId = session.user.id;
 
-  const overdueThreshold = new Date();
+  // ── Date windows ──────────────────────────────────────────────────────────
+  const now  = new Date();
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
+
+  const overdueThreshold = new Date(now);
   overdueThreshold.setUTCDate(overdueThreshold.getUTCDate() - 14);
 
-  const thirtyDaysAgo = new Date();
+  const thirtyDaysAgo = new Date(now);
   thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
 
+  const sevenDaysAgo = new Date(now);
+  sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 7);
+
+  // End of current week (Sunday)
+  const endOfWeek = new Date(today);
+  const dow = today.getDay(); // 0 = Sunday
+  endOfWeek.setDate(today.getDate() + (dow === 0 ? 0 : 7 - dow));
+
+  const todayISO      = today.toISOString().slice(0, 10);
+  const endOfWeekISO  = endOfWeek.toISOString().slice(0, 10);
+  const sevenAgoISO   = sevenDaysAgo.toISOString();
+
+  // ── Week label (e.g. "May 19–25") ────────────────────────────────────────
+  const weekLabel = `${today.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}–${endOfWeek.toLocaleDateString('en-US', { day: 'numeric' })}`;
+
+  // ── Parallel DB fetches ───────────────────────────────────────────────────
   const [
     { data: lastSession },
     { count: openCount },
     { count: overdueCount },
-    { data: recentCommitments },
+    { count: dueThisWeekCount },
+    { count: resolvedThisWeekCount },
+    { data: urgentItems },
     { data: sessionStats },
+    waitingResult,
   ] = await Promise.all([
-    // Most recent triage session
+    // Last triage session
     supabaseAdmin
       .from('triage_sessions')
       .select('triggered_at, emails_scanned, emails_surfaced')
@@ -68,44 +95,74 @@ export default async function OverviewPage() {
       .limit(1)
       .maybeSingle(),
 
-    // Open commitment count
-    supabaseAdmin
-      .from('commitments')
+    // Total open commitments
+    supabaseAdmin.from('commitments')
       .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId)
-      .eq('status', 'open'),
+      .eq('user_id', userId).eq('status', 'open'),
 
-    // Overdue count
-    supabaseAdmin
-      .from('commitments')
+    // Overdue
+    supabaseAdmin.from('commitments')
       .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId)
-      .eq('status', 'open')
-      .or(`due_date.lt.${new Date().toISOString().slice(0, 10)},scanned_at.lte.${overdueThreshold.toISOString()}`),
+      .eq('user_id', userId).eq('status', 'open')
+      .or(`due_date.lt.${todayISO},scanned_at.lte.${overdueThreshold.toISOString()}`),
 
-    // Recent commitment activity
-    supabaseAdmin
-      .from('commitments')
-      .select('id, direction, description, status, scanned_at, resolved_at, counterparty, counterparty_email')
-      .eq('user_id', userId)
-      .order('scanned_at', { ascending: false })
+    // Due this week (has an explicit due_date between today and Sunday)
+    supabaseAdmin.from('commitments')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId).eq('status', 'open').eq('direction', 'outgoing')
+      .gte('due_date', todayISO)
+      .lte('due_date', endOfWeekISO),
+
+    // Resolved in the last 7 days
+    supabaseAdmin.from('commitments')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId).eq('status', 'done')
+      .gte('resolved_at', sevenAgoISO),
+
+    // Urgent item list: overdue + due this week, up to 6
+    supabaseAdmin.from('commitments')
+      .select('id, direction, description, counterparty, counterparty_email, due_date, thread_id, scanned_at, status')
+      .eq('user_id', userId).eq('status', 'open')
+      .or(`due_date.lte.${endOfWeekISO},scanned_at.lte.${overdueThreshold.toISOString()}`)
+      .order('due_date', { ascending: true, nullsFirst: false })
+      .order('scanned_at', { ascending: true })
       .limit(6),
 
     // 30-day triage stats
-    supabaseAdmin
-      .from('triage_sessions')
+    supabaseAdmin.from('triage_sessions')
       .select('emails_scanned, emails_surfaced')
       .eq('user_id', userId)
       .gte('triggered_at', thirtyDaysAgo.toISOString()),
+
+    // Active waiting items (graceful if table doesn't exist)
+    supabaseAdmin.from('waiting_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId).eq('status', 'active')
+      .then((r) => r, () => ({ count: null, data: null, error: null })),
   ]);
 
-  const health = extensionHealth(lastSession?.triggered_at ?? null);
+  const health         = extensionHealth(lastSession?.triggered_at ?? null);
+  const scanned30d     = (sessionStats ?? []).reduce((a: number, s: any) => a + (s.emails_scanned  ?? 0), 0);
+  const surfaced30d    = (sessionStats ?? []).reduce((a: number, s: any) => a + (s.emails_surfaced ?? 0), 0);
+  const triages30d     = (sessionStats ?? []).length;
+  const waitingCount   = (waitingResult as any)?.count ?? null;
 
-  const scanned30d  = (sessionStats ?? []).reduce((a: number, s: any) => a + (s.emails_scanned  ?? 0), 0);
-  const surfaced30d = (sessionStats ?? []).reduce((a: number, s: any) => a + (s.emails_surfaced ?? 0), 0);
-  const triages30d  = (sessionStats ?? []).length;
+  // Categorise urgent items
+  const urgentList = (urgentItems ?? []).map((c: any) => {
+    const dueDateTs = c.due_date ? new Date(c.due_date + 'T00:00:00').getTime() : null;
+    const isOverdue = (dueDateTs !== null && dueDateTs < today.getTime()) ||
+                      new Date(c.scanned_at) <= overdueThreshold;
+    return { ...c, isOverdue };
+  }).sort((a: any, b: any) => {
+    // Overdue first, then by due_date asc
+    if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
+    if (a.due_date && b.due_date) return a.due_date.localeCompare(b.due_date);
+    return 0;
+  });
 
   const name = session.user.name?.split(' ')[0] ?? 'there';
+  const hasWeekActivity = (overdueCount ?? 0) > 0 || (dueThisWeekCount ?? 0) > 0 ||
+                          (resolvedThisWeekCount ?? 0) > 0 || (waitingCount ?? 0) > 0;
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -120,9 +177,8 @@ export default async function OverviewPage() {
 
       {/* Status row */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-
         {/* Extension health */}
-        <Card className="col-span-2 sm:col-span-2">
+        <Card className="col-span-2">
           <CardContent className="pt-5">
             <div className="flex items-start gap-3">
               <div className="flex items-center justify-center w-8 h-8 rounded-md bg-muted shrink-0">
@@ -135,12 +191,8 @@ export default async function OverviewPage() {
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">{health.detail}</p>
                 {!lastSession && (
-                  <a
-                    href="https://chromewebstore.google.com"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-1"
-                  >
+                  <a href="https://chromewebstore.google.com" target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-1">
                     Install extension <ExternalLink className="w-2.5 h-2.5" />
                   </a>
                 )}
@@ -149,7 +201,7 @@ export default async function OverviewPage() {
           </CardContent>
         </Card>
 
-        {/* Open commitments */}
+        {/* Open */}
         <Card>
           <CardContent className="pt-5">
             <div className="flex items-start gap-3">
@@ -180,10 +232,9 @@ export default async function OverviewPage() {
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Overdue</p>
-                <p className={[
-                  'text-2xl font-semibold',
-                  (overdueCount ?? 0) > 0 ? 'text-red-600 dark:text-red-400' : '',
-                ].join(' ')}>{overdueCount ?? 0}</p>
+                <p className={['text-2xl font-semibold', (overdueCount ?? 0) > 0 ? 'text-red-600 dark:text-red-400' : ''].join(' ')}>
+                  {overdueCount ?? 0}
+                </p>
                 <p className="text-xs text-muted-foreground">commitments</p>
               </div>
             </div>
@@ -195,77 +246,168 @@ export default async function OverviewPage() {
       <div className="flex gap-3 flex-wrap">
         <Button asChild variant="default" size="sm" className="gap-1.5">
           <a href="https://mail.google.com/?inbox_triage_run=1" target="_blank" rel="noopener noreferrer">
-            <Inbox className="w-3.5 h-3.5" />
-            Run Triage
+            <Inbox className="w-3.5 h-3.5" /> Run Triage
           </a>
         </Button>
         <Button asChild variant="outline" size="sm" className="gap-1.5">
           <Link href="/commitments?status=overdue">
-            <AlertTriangle className="w-3.5 h-3.5" />
-            Review overdue
+            <AlertTriangle className="w-3.5 h-3.5" /> Review overdue
           </Link>
         </Button>
         <Button asChild variant="outline" size="sm" className="gap-1.5">
           <Link href="/analytics">
-            <BarChart2 className="w-3.5 h-3.5" />
-            Analytics
+            <BarChart2 className="w-3.5 h-3.5" /> Analytics
           </Link>
         </Button>
       </div>
 
-      {/* New-user onboarding — shown until the first triage session fires */}
+      {/* ── My Week digest ─────────────────────────────────────────────────── */}
+      {hasWeekActivity && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <CalendarDays className="w-4 h-4 text-muted-foreground" />
+                  This week
+                </CardTitle>
+                <CardDescription>{weekLabel}</CardDescription>
+              </div>
+              <Button asChild variant="ghost" size="sm" className="gap-1 text-xs">
+                <Link href="/commitments">View all <ArrowUpRight className="w-3 h-3" /></Link>
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-0 space-y-4">
+
+            {/* Stat chips */}
+            <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm pb-3 border-b border-border">
+              {(overdueCount ?? 0) > 0 && (
+                <Link href="/commitments?status=overdue"
+                  className="flex items-center gap-1.5 text-red-600 dark:text-red-400 hover:underline">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <strong>{overdueCount}</strong> overdue
+                </Link>
+              )}
+              {(dueThisWeekCount ?? 0) > 0 && (
+                <Link href="/commitments?status=open"
+                  className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 hover:underline">
+                  <Timer className="w-3.5 h-3.5" />
+                  <strong>{dueThisWeekCount}</strong> due by {endOfWeek.toLocaleDateString('en-US', { weekday: 'short' })}
+                </Link>
+              )}
+              {(resolvedThisWeekCount ?? 0) > 0 && (
+                <span className="flex items-center gap-1.5 text-green-600 dark:text-green-400">
+                  <CheckSquare className="w-3.5 h-3.5" />
+                  <strong>{resolvedThisWeekCount}</strong> resolved
+                </span>
+              )}
+              {waitingCount !== null && waitingCount > 0 && (
+                <span className="flex items-center gap-1.5 text-muted-foreground">
+                  <Clock className="w-3.5 h-3.5" />
+                  <strong className="text-foreground">{waitingCount}</strong> waiting on replies
+                </span>
+              )}
+            </div>
+
+            {/* Urgent item list */}
+            {urgentList.length > 0 && (
+              <div className="divide-y divide-border">
+                {urgentList.map((c: any) => {
+                  const counterparty = c.counterparty || c.counterparty_email || '—';
+                  const gmailUrl     = gmailThreadUrl(c.thread_id);
+                  const dueDateLabel = c.due_date
+                    ? new Date(c.due_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+                    : null;
+
+                  return (
+                    <div key={c.id} className="flex items-start gap-3 py-2.5 group">
+                      {/* Urgency indicator */}
+                      <span className="mt-0.5 shrink-0">
+                        {c.isOverdue
+                          ? <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+                          : <Timer className="w-3.5 h-3.5 text-amber-500" />
+                        }
+                      </span>
+
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm truncate">{c.description}</p>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                          <span>
+                            {c.direction === 'outgoing' ? 'To' : 'From'}{' '}
+                            <span className="font-medium text-foreground">{counterparty}</span>
+                          </span>
+                          {dueDateLabel && (
+                            <span className={c.isOverdue ? 'text-red-500 font-medium' : 'text-amber-600 dark:text-amber-400'}>
+                              Due {dueDateLabel}
+                            </span>
+                          )}
+                          {!dueDateLabel && c.isOverdue && (
+                            <span className="text-red-500 font-medium">Overdue</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {gmailUrl && (
+                          <Button asChild variant="ghost" size="sm" className="h-6 px-1.5 text-xs gap-1">
+                            <a href={gmailUrl} target="_blank" rel="noopener noreferrer">
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </Button>
+                        )}
+                        <MarkDoneButton id={c.id} status={c.status} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Onboarding */}
       {!lastSession && (
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium">Get started in 3 steps</CardTitle>
             <CardDescription>
-              Inbox Triage works from a Chrome extension that reads your Gmail — the dashboard
-              fills in automatically once you run your first scan.
+              Inbox Triage works from a Chrome extension — the dashboard fills in automatically after your first scan.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <ol className="space-y-4">
               {[
                 {
-                  icon: ExternalLink,
-                  step: '1',
-                  title: 'Install the Chrome extension',
+                  step: '1', title: 'Install the Chrome extension',
                   detail: 'Add Inbox Triage from the Chrome Web Store.',
                   action: (
-                    <a
-                      href="https://chromewebstore.google.com"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-1"
-                    >
+                    <a href="https://chromewebstore.google.com" target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-1">
                       Open Chrome Web Store <ExternalLink className="w-2.5 h-2.5" />
                     </a>
                   ),
                 },
                 {
-                  icon: Inbox,
-                  step: '2',
-                  title: 'Open Gmail and run a triage',
-                  detail: 'Click the extension icon in your toolbar, then press "Run triage" to scan your inbox.',
+                  step: '2', title: 'Open Gmail and run a triage',
+                  detail: 'Click the extension icon, then press "Run triage" to scan your inbox.',
                   action: (
-                    <a
-                      href="https://mail.google.com"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-1"
-                    >
+                    <a href="https://mail.google.com" target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-1">
                       Open Gmail <ExternalLink className="w-2.5 h-2.5" />
                     </a>
                   ),
                 },
                 {
-                  icon: Clock,
-                  step: '3',
-                  title: 'Come back here',
-                  detail: 'Your commitments, activity stats, and analytics will appear on this dashboard after your first scan.',
+                  step: '3', title: 'Come back here',
+                  detail: 'Your commitments, activity stats, and analytics will appear after your first scan.',
                   action: null,
                 },
-              ].map(({ icon: Icon, step, title, detail, action }) => (
+              ].map(({ step, title, detail, action }) => (
                 <li key={step} className="flex items-start gap-3">
                   <div className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-semibold shrink-0 mt-0.5">
                     {step}
@@ -301,63 +443,6 @@ export default async function OverviewPage() {
                   <p className="text-2xl font-semibold mt-0.5">{value}</p>
                 </div>
               ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Recent commitment activity */}
-      {(recentCommitments ?? []).length > 0 && (
-        <Card>
-          <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
-            <div>
-              <CardTitle className="text-sm font-medium">Recent commitments</CardTitle>
-              <CardDescription>Latest promises detected by the extension.</CardDescription>
-            </div>
-            <Button asChild variant="ghost" size="sm" className="gap-1 text-xs">
-              <Link href="/commitments">
-                View all <ArrowUpRight className="w-3 h-3" />
-              </Link>
-            </Button>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="divide-y divide-border">
-              {(recentCommitments ?? []).map((c: any) => {
-                const counterparty = c.counterparty || c.counterparty_email || '—';
-                return (
-                  <div key={c.id} className="flex items-start gap-3 py-3">
-                    <span
-                      className="mt-0.5 shrink-0"
-                      title={c.direction === 'outgoing' ? 'Your promise' : 'Assigned to you'}
-                    >
-                      <ArrowUpRight
-                        className={[
-                          'w-3.5 h-3.5',
-                          c.direction === 'outgoing'
-                            ? 'text-blue-500 dark:text-blue-400'
-                            : 'rotate-180 text-amber-500 dark:text-amber-400',
-                        ].join(' ')}
-                      />
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className={[
-                        'text-sm truncate',
-                        c.status === 'done' ? 'line-through text-muted-foreground' : '',
-                      ].join(' ')}>
-                        {c.description}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {c.direction === 'outgoing' ? 'To' : 'From'} {counterparty}
-                        {' · '}
-                        {relativeTime(c.scanned_at)}
-                      </p>
-                    </div>
-                    {c.status === 'done' && (
-                      <Badge variant="secondary" className="text-[10px] py-0 shrink-0">Done</Badge>
-                    )}
-                  </div>
-                );
-              })}
             </div>
           </CardContent>
         </Card>
