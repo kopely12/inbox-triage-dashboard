@@ -2,26 +2,47 @@ import { auth } from '@/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 import { NextResponse } from 'next/server';
 
-// ── In-process rate limiter ────────────────────────────────────────────────
-// Tracks the timestamps of recent requests per user. Effective on long-lived
-// Node.js servers; resets on cold starts in serverless deployments (acceptable
-// trade-off for a low-frequency data-export endpoint at this scale).
+// ── DB-backed rate limiter ─────────────────────────────────────────────────
+// Timestamps are stored inside user_preferences.prefs.__download_timestamps
+// so they persist across serverless cold starts and multiple instances.
 
-const WINDOW_MS  = 60 * 60 * 1000; // 1 hour
-const MAX_HITS   = 3;               // max downloads per window
+const WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const MAX_HITS  = 3;               // max downloads per window
 
-const rateMap = new Map<string, number[]>(); // userId → timestamps[]
+async function checkRateLimit(
+  userId: string,
+): Promise<{ limited: boolean; retryAfterSecs: number }> {
+  const now = Date.now();
 
-function isRateLimited(userId: string): { limited: boolean; retryAfterSecs: number } {
-  const now  = Date.now();
-  const hits = (rateMap.get(userId) ?? []).filter((t) => now - t < WINDOW_MS);
-  if (hits.length >= MAX_HITS) {
-    const oldestHit     = Math.min(...hits);
-    const retryAfterMs  = WINDOW_MS - (now - oldestHit);
-    return { limited: true, retryAfterSecs: Math.ceil(retryAfterMs / 1000) };
+  const { data } = await supabaseAdmin
+    .from('user_preferences')
+    .select('prefs')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  const existing   = (data?.prefs as Record<string, unknown>) ?? {};
+  const raw        = existing.__download_timestamps;
+  const allHits    = Array.isArray(raw) ? (raw as number[]) : [];
+  const recent     = allHits.filter((t) => now - t < WINDOW_MS);
+
+  if (recent.length >= MAX_HITS) {
+    const oldest = Math.min(...recent);
+    return { limited: true, retryAfterSecs: Math.ceil((WINDOW_MS - (now - oldest)) / 1000) };
   }
-  hits.push(now);
-  rateMap.set(userId, hits);
+
+  // Record this hit
+  const updated = [...recent, now];
+  await supabaseAdmin
+    .from('user_preferences')
+    .upsert(
+      {
+        user_id:    userId,
+        prefs:      { ...existing, __download_timestamps: updated },
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' },
+    );
+
   return { limited: false, retryAfterSecs: 0 };
 }
 
@@ -35,19 +56,19 @@ export async function GET() {
 
   const userId = session.user.id;
 
-  const { limited, retryAfterSecs } = isRateLimited(userId);
+  const { limited, retryAfterSecs } = await checkRateLimit(userId);
   if (limited) {
     return NextResponse.json(
       { error: 'Too many requests. You can download your data up to 3 times per hour.' },
       {
         status: 429,
         headers: {
-          'Retry-After': String(retryAfterSecs),
+          'Retry-After':           String(retryAfterSecs),
           'X-RateLimit-Limit':     String(MAX_HITS),
           'X-RateLimit-Remaining': '0',
           'X-RateLimit-Reset':     String(Math.ceil((Date.now() + retryAfterSecs * 1000) / 1000)),
         },
-      }
+      },
     );
   }
 

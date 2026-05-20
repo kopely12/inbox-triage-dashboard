@@ -3,9 +3,10 @@ import { supabaseAdmin }  from '@/lib/supabase';
 import { redirect }       from 'next/navigation';
 import Link               from 'next/link';
 import { Info, Download } from 'lucide-react';
-import { ExtensionPrefsForm } from '@/components/settings/extension-prefs-form';
-import { PreferencesForm }    from '@/components/settings/preferences-form';
-import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog';
+import { ExtensionPrefsForm }   from '@/components/settings/extension-prefs-form';
+import { PreferencesForm }      from '@/components/settings/preferences-form';
+import { DeleteAccountDialog }  from '@/components/settings/delete-account-dialog';
+import { GmailConnectionCard }  from '@/components/settings/gmail-connection-card';
 import { PREFS_DEFAULTS, type ExtensionPrefs } from '@/lib/extension-prefs';
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -28,7 +29,7 @@ export default async function PreferencesPage() {
       .maybeSingle(),
     supabaseAdmin
       .from('users')
-      .select('timezone, default_snooze_hours')
+      .select('timezone, default_snooze_hours, name, email')
       .eq('id', userId)
       .maybeSingle(),
   ]);
@@ -36,6 +37,8 @@ export default async function PreferencesPage() {
   const extensionPrefs: ExtensionPrefs = { ...PREFS_DEFAULTS, ...(prefs?.prefs ?? {}) };
   const timezone           = user?.timezone             ?? 'UTC';
   const defaultSnoozeHours = user?.default_snooze_hours ?? 24;
+  const gmailEmail         = user?.email  ?? session.user.email ?? '';
+  const gmailName          = user?.name   ?? session.user.name  ?? null;
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -53,6 +56,9 @@ export default async function PreferencesPage() {
           Changes sync to your extension automatically. Reload Gmail or re-open the sidebar to apply them immediately.
         </p>
       </div>
+
+      {/* Gmail connection */}
+      <GmailConnectionCard email={gmailEmail} name={gmailName} />
 
       {/* Extension scan preferences */}
       <ExtensionPrefsForm initialPrefs={extensionPrefs} />

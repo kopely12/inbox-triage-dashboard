@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useEffect, useCallback } from 'react';
 import { saveExtensionPrefs } from '@/app/actions/extension-prefs';
 import type { ExtensionPrefs, PriorityRule } from '@/lib/extension-prefs';
-import { Button }  from '@/components/ui/button';
-import { Label }   from '@/components/ui/label';
+import { Button }    from '@/components/ui/button';
+import { Label }     from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { Loader2, Check, Plus, X as XIcon } from 'lucide-react';
+import { Loader2, Check, Plus, X as XIcon, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // ─── Tiny helpers ────────────────────────────────────────────────────────────
@@ -65,43 +65,6 @@ function ToggleRow({
         {description && <p className="text-xs text-muted-foreground mt-0.5">{description}</p>}
       </div>
       <Toggle checked={checked} onChange={onChange} disabled={disabled} />
-    </div>
-  );
-}
-
-function SaveRow({
-  section,
-  savingSection,
-  savedSection,
-  onSave,
-  disabled,
-  error,
-}: {
-  section: string;
-  savingSection: string | null;
-  savedSection: string | null;
-  onSave: () => void;
-  disabled?: boolean;
-  error?: string | null;
-}) {
-  const isSaving = savingSection === section;
-  const isSaved  = savedSection  === section;
-  return (
-    <div className="flex items-center gap-3 pt-2">
-      {error && savingSection === null && <p className="text-xs text-destructive flex-1">{error}</p>}
-      <Button
-        type="button"
-        size="sm"
-        disabled={disabled || isSaving}
-        onClick={onSave}
-        className="ml-auto"
-      >
-        {isSaving ? (
-          <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Saving…</>
-        ) : isSaved ? (
-          <><Check className="w-3.5 h-3.5 mr-1.5 text-green-500" />Saved</>
-        ) : 'Save'}
-      </Button>
     </div>
   );
 }
@@ -255,9 +218,13 @@ interface Props {
 
 export function ExtensionPrefsForm({ initialPrefs }: Props) {
   const [pending, startTransition] = useTransition();
-  const [savingSection, setSavingSection] = useState<string | null>(null);
-  const [savedSection,  setSavedSection]  = useState<string | null>(null);
-  const [saveError,     setSaveError]     = useState<string | null>(null);
+  const [saving,    setSaving]    = useState(false);
+  const [saved,     setSaved]     = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isDirty,   setIsDirty]   = useState(false);
+
+  // Mark dirty whenever any field changes — wrapped below via `mk`
+  const markDirty = useCallback(() => setIsDirty(true), []);
 
   // ── Local state mirrors prefs ──────────────────────────────────────────────
   // Section: Triage
@@ -298,27 +265,68 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
   const [theme,              setTheme]              = useState(initialPrefs.theme);
   const [snoozeDefault,      setSnoozeDefault]      = useState(initialPrefs.snooze_default);
 
-  // ── Shared save helper ─────────────────────────────────────────────────────
-  function save(section: string, partial: Partial<ExtensionPrefs>) {
-    setSavingSection(section);
-    setSavedSection(null);
+  // ── Dirty-tracking wrappers ────────────────────────────────────────────────
+  // `mk(setter)` returns a new setter that also calls markDirty
+  function mk<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); markDirty(); };
+  }
+
+  // Warn on navigate-away with unsaved changes
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (isDirty) { e.preventDefault(); e.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDirty]);
+
+  // ── Save all ───────────────────────────────────────────────────────────────
+  function saveAll() {
+    setSaving(true);
+    setSaved(false);
     setSaveError(null);
     startTransition(async () => {
-      const result = await saveExtensionPrefs(partial);
-      setSavingSection(null);
+      const result = await saveExtensionPrefs({
+        triage_depth:     triageDepth,
+        auto_triage:      autoTriage,
+        auto_triage_time: autoTriageTime,
+        working_hours:    workingHours,
+        read_body:        readBody,
+        read_sent:        readSent,
+        read_old:         readOld,
+        read_promo:       readPromo,
+        skip_newsletters: skipNewsletters,
+        skip_receipts:    skipReceipts,
+        skip_calendar:    skipCalendar,
+        skip_social:      skipSocial,
+        skip_financial:   skipFinancial,
+        whitelist:        parseLines(whitelist),
+        blacklist:        parseLines(blacklist),
+        priority_rules:   priorityRules,
+        personal_context: personalContext.trim(),
+        internal_domains: parseLines(internalDomains),
+        compose_detection:    composeDetection,
+        followup_suggestions: followupSuggestions,
+        draft_replies:        draftReplies,
+        overdue_days:         Math.max(1, Math.min(90, Number(overdueDays) || 14)),
+        keyboard_shortcuts:  keyboardShortcuts,
+        tasks_default_view:  tasksDefaultView,
+        snooze_default:      snoozeDefault,
+        theme,
+      });
+      setSaving(false);
       if (result?.error) {
         setSaveError(result.error);
       } else {
-        setSavedSection(section);
-        setTimeout(() => setSavedSection(prev => prev === section ? null : prev), 2500);
+        setSaved(true);
+        setIsDirty(false);
+        setTimeout(() => setSaved((s) => (s ? false : s)), 2500);
       }
     });
   }
 
-  const disabled = pending;
-
-  // ── Input class ────────────────────────────────────────────────────────────
-  const inputCls = 'w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm disabled:opacity-50';
+  const disabled   = pending || saving;
+  const inputCls   = 'w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm disabled:opacity-50';
   const textareaCls = 'w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono placeholder:font-sans placeholder:text-muted-foreground disabled:opacity-50';
 
   return (
@@ -334,12 +342,7 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>Scan depth</Label>
-              <select
-                value={triageDepth}
-                onChange={(e) => setTriageDepth(e.target.value)}
-                disabled={disabled}
-                className={inputCls}
-              >
+              <select value={triageDepth} onChange={(e) => { setTriageDepth(e.target.value); markDirty(); }} disabled={disabled} className={inputCls}>
                 <option value="20">20 emails (fast)</option>
                 <option value="50">50 emails</option>
                 <option value="100">100 emails</option>
@@ -350,12 +353,7 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
 
             <div className="space-y-1.5">
               <Label>Auto-triage</Label>
-              <select
-                value={autoTriage}
-                onChange={(e) => setAutoTriage(e.target.value)}
-                disabled={disabled}
-                className={inputCls}
-              >
+              <select value={autoTriage} onChange={(e) => { setAutoTriage(e.target.value); markDirty(); }} disabled={disabled} className={inputCls}>
                 <option value="manual">Manual only</option>
                 <option value="startup">On Gmail open</option>
                 <option value="scheduled">Scheduled time</option>
@@ -367,13 +365,7 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
           {autoTriage === 'scheduled' && (
             <div className="space-y-1.5 max-w-[160px]">
               <Label>Scheduled time</Label>
-              <input
-                type="time"
-                value={autoTriageTime}
-                onChange={(e) => setAutoTriageTime(e.target.value)}
-                disabled={disabled}
-                className={inputCls}
-              />
+              <input type="time" value={autoTriageTime} onChange={(e) => { setAutoTriageTime(e.target.value); markDirty(); }} disabled={disabled} className={inputCls} />
             </div>
           )}
 
@@ -384,49 +376,18 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <p className="text-xs text-muted-foreground">Start</p>
-                <input
-                  type="time"
-                  value={workingHours.start}
-                  onChange={(e) => setWorkingHours({ ...workingHours, start: e.target.value })}
-                  disabled={disabled}
-                  className={inputCls}
-                />
+                <input type="time" value={workingHours.start} onChange={(e) => { setWorkingHours({ ...workingHours, start: e.target.value }); markDirty(); }} disabled={disabled} className={inputCls} />
               </div>
               <div className="space-y-1.5">
                 <p className="text-xs text-muted-foreground">End</p>
-                <input
-                  type="time"
-                  value={workingHours.end}
-                  onChange={(e) => setWorkingHours({ ...workingHours, end: e.target.value })}
-                  disabled={disabled}
-                  className={inputCls}
-                />
+                <input type="time" value={workingHours.end} onChange={(e) => { setWorkingHours({ ...workingHours, end: e.target.value }); markDirty(); }} disabled={disabled} className={inputCls} />
               </div>
             </div>
-            <DayPicker
-              selected={workingHours.days}
-              onChange={(days) => setWorkingHours({ ...workingHours, days })}
-            />
+            <DayPicker selected={workingHours.days} onChange={(days) => { setWorkingHours({ ...workingHours, days }); markDirty(); }} />
             <p className="text-xs text-muted-foreground">
               Outside these hours, due-today flags are suppressed so you can disconnect.
             </p>
           </div>
-
-          <SaveRow
-            section="triage"
-            savingSection={savingSection}
-            savedSection={savedSection}
-            error={saveError}
-            disabled={disabled}
-            onSave={() =>
-              save('triage', {
-                triage_depth:     triageDepth,
-                auto_triage:      autoTriage,
-                auto_triage_time: autoTriageTime,
-                working_hours:    workingHours,
-              })
-            }
-          />
         </CardContent>
       </Card>
 
@@ -437,73 +398,20 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
           <CardDescription>Control which emails are included in each triage run.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-1 divide-y divide-border">
-          <ToggleRow
-            label="Read email bodies"
-            description="Fetch the full body for richer AI analysis. Disabling makes triage faster but less accurate."
-            checked={readBody} onChange={setReadBody} disabled={disabled}
-          />
-          <ToggleRow
-            label="Include sent emails"
-            description="Surface threads where you sent the last message and may be waiting on a reply."
-            checked={readSent} onChange={setReadSent} disabled={disabled}
-          />
-          <ToggleRow
-            label="Include older emails"
-            description="Extend the scan window beyond the default 7 days."
-            checked={readOld} onChange={setReadOld} disabled={disabled}
-          />
-          <ToggleRow
-            label="Include Promotions tab"
-            description="Scan the Gmail Promotions category (usually marketing email — off by default)."
-            checked={readPromo} onChange={setReadPromo} disabled={disabled}
-          />
+          <ToggleRow label="Read email bodies" description="Fetch the full body for richer AI analysis. Disabling makes triage faster but less accurate." checked={readBody} onChange={mk(setReadBody)} disabled={disabled} />
+          <ToggleRow label="Include sent emails" description="Surface threads where you sent the last message and may be waiting on a reply." checked={readSent} onChange={mk(setReadSent)} disabled={disabled} />
+          <ToggleRow label="Include older emails" description="Extend the scan window beyond the default 7 days." checked={readOld} onChange={mk(setReadOld)} disabled={disabled} />
+          <ToggleRow label="Include Promotions tab" description="Scan the Gmail Promotions category (usually marketing email — off by default)." checked={readPromo} onChange={mk(setReadPromo)} disabled={disabled} />
 
           <div className="pt-2 pb-1">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Auto-skip</p>
           </div>
 
-          <ToggleRow
-            label="Newsletters"
-            description="Emails identified as bulk newsletters."
-            checked={skipNewsletters} onChange={setSkipNewsletters} disabled={disabled}
-          />
-          <ToggleRow
-            label="Receipts & confirmations"
-            description="Order confirmations, shipping notices, booking emails."
-            checked={skipReceipts} onChange={setSkipReceipts} disabled={disabled}
-          />
-          <ToggleRow
-            label="Calendar notifications"
-            description="Invite accepted/declined messages and calendar digests."
-            checked={skipCalendar} onChange={setSkipCalendar} disabled={disabled}
-          />
-          <ToggleRow
-            label="Social notifications"
-            description="Emails from LinkedIn, Twitter/X, GitHub, Slack, etc."
-            checked={skipSocial} onChange={setSkipSocial} disabled={disabled}
-          />
-          <ToggleRow
-            label="Financial alerts"
-            description="Bank notifications, credit card alerts, and similar."
-            checked={skipFinancial} onChange={setSkipFinancial} disabled={disabled}
-          />
-
-          <SaveRow
-            section="scan"
-            savingSection={savingSection}
-            savedSection={savedSection}
-            error={saveError}
-            disabled={disabled}
-            onSave={() =>
-              save('scan', {
-                read_body: readBody, read_sent: readSent,
-                read_old: readOld, read_promo: readPromo,
-                skip_newsletters: skipNewsletters, skip_receipts: skipReceipts,
-                skip_calendar: skipCalendar, skip_social: skipSocial,
-                skip_financial: skipFinancial,
-              })
-            }
-          />
+          <ToggleRow label="Newsletters" description="Emails identified as bulk newsletters." checked={skipNewsletters} onChange={mk(setSkipNewsletters)} disabled={disabled} />
+          <ToggleRow label="Receipts & confirmations" description="Order confirmations, shipping notices, booking emails." checked={skipReceipts} onChange={mk(setSkipReceipts)} disabled={disabled} />
+          <ToggleRow label="Calendar notifications" description="Invite accepted/declined messages and calendar digests." checked={skipCalendar} onChange={mk(setSkipCalendar)} disabled={disabled} />
+          <ToggleRow label="Social notifications" description="Emails from LinkedIn, Twitter/X, GitHub, Slack, etc." checked={skipSocial} onChange={mk(setSkipSocial)} disabled={disabled} />
+          <ToggleRow label="Financial alerts" description="Bank notifications, credit card alerts, and similar." checked={skipFinancial} onChange={mk(setSkipFinancial)} disabled={disabled} />
         </CardContent>
       </Card>
 
@@ -511,60 +419,23 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium">Sender rules</CardTitle>
-          <CardDescription>
-            Override how specific senders are treated — regardless of their learned score.
-          </CardDescription>
+          <CardDescription>Override how specific senders are treated — regardless of their learned score.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="space-y-2">
             <Label>Always surface</Label>
-            <textarea
-              rows={3}
-              value={whitelist}
-              onChange={(e) => setWhitelist(e.target.value)}
-              disabled={disabled}
-              placeholder={'boss@company.com\n@vip-client.com'}
-              className={textareaCls}
-            />
-            <p className="text-xs text-muted-foreground">
-              One email or domain per line. These senders always pass through the noise filter.
-            </p>
+            <textarea rows={3} value={whitelist} onChange={(e) => { setWhitelist(e.target.value); markDirty(); }} disabled={disabled} placeholder={'boss@company.com\n@vip-client.com'} className={textareaCls} />
+            <p className="text-xs text-muted-foreground">One email or domain per line. These senders always pass through the noise filter.</p>
           </div>
-
           <div className="space-y-2">
             <Label>Always skip</Label>
-            <textarea
-              rows={3}
-              value={blacklist}
-              onChange={(e) => setBlacklist(e.target.value)}
-              disabled={disabled}
-              placeholder={'noreply@notifications.com\n@marketing-blasts.net'}
-              className={textareaCls}
-            />
-            <p className="text-xs text-muted-foreground">
-              One email or domain per line. These senders are always filtered out.
-            </p>
+            <textarea rows={3} value={blacklist} onChange={(e) => { setBlacklist(e.target.value); markDirty(); }} disabled={disabled} placeholder={'noreply@notifications.com\n@marketing-blasts.net'} className={textareaCls} />
+            <p className="text-xs text-muted-foreground">One email or domain per line. These senders are always filtered out.</p>
           </div>
-
           <div className="space-y-2">
             <Label>Priority overrides</Label>
-            <PriorityRulesEditor rules={priorityRules} onChange={setPriorityRules} />
+            <PriorityRulesEditor rules={priorityRules} onChange={mk(setPriorityRules)} />
           </div>
-
-          <SaveRow
-            section="senders"
-            savingSection={savingSection}
-            savedSection={savedSection}
-            error={saveError}
-            disabled={disabled}
-            onSave={() =>
-              save('senders', {
-                whitelist:      parseLines(whitelist),
-                blacklist:      parseLines(blacklist),
-                priority_rules: priorityRules,
-              })
-            }
-          />
         </CardContent>
       </Card>
 
@@ -572,55 +443,21 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium">AI & context</CardTitle>
-          <CardDescription>
-            Extra context injected into every triage prompt. The more you share, the smarter the prioritisation.
-          </CardDescription>
+          <CardDescription>Extra context injected into every triage prompt. The more you share, the smarter the prioritisation.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label>Personal context</Label>
-            <textarea
-              rows={5}
-              value={personalContext}
-              onChange={(e) => setPersonalContext(e.target.value)}
-              disabled={disabled}
-              placeholder={`I'm a founder at a 12-person B2B SaaS company. My top priorities are:\n• Unblocking my engineering team\n• Closing deals with enterprise prospects\n• Investor communications`}
-              className={textareaCls}
-            />
-            <p className="text-xs text-muted-foreground">
-              Describe your role, priorities, and anything that helps Claude decide what matters to you.
-            </p>
+            <textarea rows={5} value={personalContext} onChange={(e) => { setPersonalContext(e.target.value); markDirty(); }} disabled={disabled} placeholder={`I'm a founder at a 12-person B2B SaaS company. My top priorities are:\n• Unblocking my engineering team\n• Closing deals with enterprise prospects\n• Investor communications`} className={textareaCls} />
+            <p className="text-xs text-muted-foreground">Describe your role, priorities, and anything that helps Claude decide what matters to you.</p>
           </div>
-
           <div className="space-y-2">
             <Label>Internal domains</Label>
-            <textarea
-              rows={2}
-              value={internalDomains}
-              onChange={(e) => setInternalDomains(e.target.value)}
-              disabled={disabled}
-              placeholder={'mycompany.com\ncontractor-firm.com'}
-              className={textareaCls}
-            />
+            <textarea rows={2} value={internalDomains} onChange={(e) => { setInternalDomains(e.target.value); markDirty(); }} disabled={disabled} placeholder={'mycompany.com\ncontractor-firm.com'} className={textareaCls} />
             <p className="text-xs text-muted-foreground">
-              One domain per line. Emails from these domains are treated as internal colleagues
-              and scored differently from external contacts.
+              One domain per line. Emails from these domains are treated as internal colleagues and scored differently from external contacts.
             </p>
           </div>
-
-          <SaveRow
-            section="ai"
-            savingSection={savingSection}
-            savedSection={savedSection}
-            error={saveError}
-            disabled={disabled}
-            onSave={() =>
-              save('ai', {
-                personal_context: personalContext.trim(),
-                internal_domains: parseLines(internalDomains),
-              })
-            }
-          />
         </CardContent>
       </Card>
 
@@ -631,56 +468,18 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
           <CardDescription>Control how the extension tracks what you owe and what you&apos;re owed.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-1 divide-y divide-border">
-          <ToggleRow
-            label="Detect commitments when composing"
-            description="Scan emails you send and extract &quot;I will…&quot; commitments automatically."
-            checked={composeDetection} onChange={setComposeDetection} disabled={disabled}
-          />
-          <ToggleRow
-            label="Suggest follow-up reminders"
-            description="When you send an email, offer to create a follow-up if no reply arrives."
-            checked={followupSuggestions} onChange={setFollowupSuggestions} disabled={disabled}
-          />
-          <ToggleRow
-            label="AI-drafted reply suggestions"
-            description="Show a suggested reply draft when you open a triage card."
-            checked={draftReplies} onChange={setDraftReplies} disabled={disabled}
-          />
+          <ToggleRow label="Detect commitments when composing" description="Scan emails you send and extract &quot;I will…&quot; commitments automatically." checked={composeDetection} onChange={mk(setComposeDetection)} disabled={disabled} />
+          <ToggleRow label="Suggest follow-up reminders" description="When you send an email, offer to create a follow-up if no reply arrives." checked={followupSuggestions} onChange={mk(setFollowupSuggestions)} disabled={disabled} />
+          <ToggleRow label="AI-drafted reply suggestions" description="Show a suggested reply draft when you open a triage card." checked={draftReplies} onChange={mk(setDraftReplies)} disabled={disabled} />
 
           <div className="pt-3 pb-1 space-y-1.5">
             <Label>Overdue threshold</Label>
             <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={1}
-                max={90}
-                value={overdueDays}
-                onChange={(e) => setOverdueDays(e.target.value)}
-                disabled={disabled}
-                className="w-20 h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
-              />
+              <input type="number" min={1} max={90} value={overdueDays} onChange={(e) => { setOverdueDays(e.target.value); markDirty(); }} disabled={disabled} className="w-20 h-9 rounded-md border border-input bg-background px-3 py-1 text-sm" />
               <span className="text-sm text-muted-foreground">days</span>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Open commitments older than this are flagged as overdue in the My Tasks view.
-            </p>
+            <p className="text-xs text-muted-foreground">Open commitments older than this are flagged as overdue in the My Tasks view.</p>
           </div>
-
-          <SaveRow
-            section="tasks"
-            savingSection={savingSection}
-            savedSection={savedSection}
-            error={saveError}
-            disabled={disabled}
-            onSave={() =>
-              save('tasks', {
-                compose_detection:    composeDetection,
-                followup_suggestions: followupSuggestions,
-                draft_replies:        draftReplies,
-                overdue_days:         Math.max(1, Math.min(90, Number(overdueDays) || 14)),
-              })
-            }
-          />
         </CardContent>
       </Card>
 
@@ -692,22 +491,13 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-1 divide-y divide-border">
-            <ToggleRow
-              label="Keyboard shortcuts"
-              description="J/K to navigate, R to reply, E to archive, S to snooze, and more."
-              checked={keyboardShortcuts} onChange={setKeyboardShortcuts} disabled={disabled}
-            />
+            <ToggleRow label="Keyboard shortcuts" description="J/K to navigate, R to reply, E to archive, S to snooze, and more." checked={keyboardShortcuts} onChange={mk(setKeyboardShortcuts)} disabled={disabled} />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 pt-1">
             <div className="space-y-1.5">
               <Label>Default task view</Label>
-              <select
-                value={tasksDefaultView}
-                onChange={(e) => setTasksDefaultView(e.target.value)}
-                disabled={disabled}
-                className={inputCls}
-              >
+              <select value={tasksDefaultView} onChange={(e) => { setTasksDefaultView(e.target.value); markDirty(); }} disabled={disabled} className={inputCls}>
                 <option value="grouped">Grouped by sender</option>
                 <option value="flat">Flat list</option>
               </select>
@@ -715,12 +505,7 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
 
             <div className="space-y-1.5">
               <Label>Default snooze</Label>
-              <select
-                value={snoozeDefault}
-                onChange={(e) => setSnoozeDefault(e.target.value)}
-                disabled={disabled}
-                className={inputCls}
-              >
+              <select value={snoozeDefault} onChange={(e) => { setSnoozeDefault(e.target.value); markDirty(); }} disabled={disabled} className={inputCls}>
                 <option value="tomorrow">Tomorrow morning (9 am)</option>
                 <option value="3days">In 3 days</option>
                 <option value="monday">Next Monday</option>
@@ -730,36 +515,97 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
 
             <div className="space-y-1.5">
               <Label>Theme</Label>
-              <select
-                value={theme}
-                onChange={(e) => setTheme(e.target.value)}
-                disabled={disabled}
-                className={inputCls}
-              >
+              <select value={theme} onChange={(e) => { setTheme(e.target.value); markDirty(); }} disabled={disabled} className={inputCls}>
                 <option value="auto">Auto (follow system)</option>
                 <option value="light">Light</option>
                 <option value="dark">Dark</option>
               </select>
             </div>
           </div>
-
-          <SaveRow
-            section="interface"
-            savingSection={savingSection}
-            savedSection={savedSection}
-            error={saveError}
-            disabled={disabled}
-            onSave={() =>
-              save('interface', {
-                keyboard_shortcuts:  keyboardShortcuts,
-                tasks_default_view:  tasksDefaultView,
-                snooze_default:      snoozeDefault,
-                theme,
-              })
-            }
-          />
         </CardContent>
       </Card>
+
+      {/* ── Sticky save bar ───────────────────────────────────────────────── */}
+      {/* Shown as soon as any field changes; disappears after a successful save */}
+      <div
+        className={cn(
+          'sticky bottom-4 z-10 transition-all duration-200',
+          isDirty || saved || saveError
+            ? 'opacity-100 translate-y-0 pointer-events-auto'
+            : 'opacity-0 translate-y-2 pointer-events-none',
+        )}
+      >
+        <div className="flex items-center justify-between gap-4 rounded-lg border bg-background px-4 py-3 shadow-lg">
+          <div className="flex items-center gap-2 min-w-0">
+            {saveError ? (
+              <>
+                <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />
+                <p className="text-sm text-destructive truncate">{saveError}</p>
+              </>
+            ) : saved ? (
+              <>
+                <Check className="h-4 w-4 shrink-0 text-emerald-600" />
+                <p className="text-sm text-muted-foreground">All preferences saved.</p>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">You have unsaved changes.</p>
+            )}
+          </div>
+
+          <div className="flex shrink-0 items-center gap-2">
+            {isDirty && !saving && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  // Reset all fields to initialPrefs
+                  setTriageDepth(initialPrefs.triage_depth);
+                  setAutoTriage(initialPrefs.auto_triage);
+                  setAutoTriageTime(initialPrefs.auto_triage_time);
+                  setWorkingHours(initialPrefs.working_hours);
+                  setReadBody(initialPrefs.read_body);
+                  setReadSent(initialPrefs.read_sent);
+                  setReadOld(initialPrefs.read_old);
+                  setReadPromo(initialPrefs.read_promo);
+                  setSkipNewsletters(initialPrefs.skip_newsletters);
+                  setSkipReceipts(initialPrefs.skip_receipts);
+                  setSkipCalendar(initialPrefs.skip_calendar);
+                  setSkipSocial(initialPrefs.skip_social);
+                  setSkipFinancial(initialPrefs.skip_financial);
+                  setWhitelist(initialPrefs.whitelist.join('\n'));
+                  setBlacklist(initialPrefs.blacklist.join('\n'));
+                  setPriorityRules(initialPrefs.priority_rules);
+                  setPersonalContext(initialPrefs.personal_context);
+                  setInternalDomains(initialPrefs.internal_domains.join('\n'));
+                  setComposeDetection(initialPrefs.compose_detection);
+                  setFollowupSuggestions(initialPrefs.followup_suggestions);
+                  setDraftReplies(initialPrefs.draft_replies);
+                  setOverdueDays(String(initialPrefs.overdue_days));
+                  setKeyboardShortcuts(initialPrefs.keyboard_shortcuts);
+                  setTasksDefaultView(initialPrefs.tasks_default_view);
+                  setSnoozeDefault(initialPrefs.snooze_default);
+                  setTheme(initialPrefs.theme);
+                  setIsDirty(false);
+                  setSaveError(null);
+                }}
+              >
+                Discard
+              </Button>
+            )}
+
+            <Button type="button" size="sm" disabled={disabled || (!isDirty && !saveError)} onClick={saveAll}>
+              {saving ? (
+                <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Saving…</>
+              ) : saved && !isDirty ? (
+                <><Check className="w-3.5 h-3.5 mr-1.5" />Saved</>
+              ) : (
+                'Save'
+              )}
+            </Button>
+          </div>
+        </div>
+      </div>
 
     </div>
   );
