@@ -6,18 +6,49 @@ import { getOrCreateOrg } from '@/lib/org';
 import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'crypto';
 
+// ── Auth guard ────────────────────────────────────────────────────────────────
+// Returns { error } instead of throwing so callers can forward a structured
+// response to the client rather than surfacing an unhandled server exception.
+
 async function requireAdmin() {
   const session = await auth();
-  if (!session?.user?.id) throw new Error('Unauthenticated');
+  if (!session?.user?.id) return { error: 'Unauthenticated' as const, session: null };
   const role = session.user.orgRole;
-  if (role !== 'admin' && role !== 'owner') throw new Error('Forbidden');
-  return session;
+  if (role !== 'admin' && role !== 'owner') return { error: 'Forbidden' as const, session: null };
+  return { error: null, session };
 }
 
+// ── Seat limit helper ─────────────────────────────────────────────────────────
+
+async function checkSeatLimit(orgId: string): Promise<string | null> {
+  const [{ data: org }, { count: activeCount }] = await Promise.all([
+    supabaseAdmin
+      .from('organizations')
+      .select('seat_count')
+      .eq('id', orgId)
+      .single(),
+    supabaseAdmin
+      .from('org_members')
+      .select('*', { count: 'exact', head: true })
+      .eq('org_id', orgId)
+      .eq('status', 'active'),
+  ]);
+
+  const seatCount = org?.seat_count ?? 0;
+  if (seatCount > 0 && (activeCount ?? 0) >= seatCount) {
+    return `Your plan allows ${seatCount} seat${seatCount !== 1 ? 's' : ''} and all are taken. Upgrade your plan to add more members.`;
+  }
+  return null;
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+
 export async function inviteMember(formData: FormData) {
-  const session = await requireAdmin();
-  const email   = (formData.get('email') as string)?.trim().toLowerCase();
-  const role    = (formData.get('role') as string) ?? 'member';
+  const { error: authErr, session } = await requireAdmin();
+  if (authErr) return { error: authErr };
+
+  const email = (formData.get('email') as string)?.trim().toLowerCase();
+  const role  = (formData.get('role') as string) ?? 'member';
 
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { error: 'Please enter a valid email address.' };
@@ -27,11 +58,15 @@ export async function inviteMember(formData: FormData) {
   }
 
   const orgId = await getOrCreateOrg(
-    session.user.id,
-    session.user.email ?? '',
-    session.user.orgRole,
+    session!.user.id,
+    session!.user.email ?? '',
+    session!.user.orgRole,
   );
   if (!orgId) return { error: 'No organization found.' };
+
+  // Enforce seat limit before issuing the invite
+  const seatErr = await checkSeatLimit(orgId);
+  if (seatErr) return { error: seatErr };
 
   // Check if a user with this email is already an active member
   const { data: existingUser } = await supabaseAdmin
@@ -60,12 +95,12 @@ export async function inviteMember(formData: FormData) {
     .from('org_invites')
     .upsert(
       {
-        org_id:     orgId,
+        org_id:      orgId,
         email,
         role,
         token,
-        invited_by: session.user.id,
-        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        invited_by:  session!.user.id,
+        expires_at:  new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         accepted_at: null,
       },
       { onConflict: 'org_id,email', ignoreDuplicates: false }
@@ -79,7 +114,9 @@ export async function inviteMember(formData: FormData) {
 }
 
 export async function changeRole(memberId: string, newRole: 'admin' | 'member') {
-  await requireAdmin();
+  const { error: authErr } = await requireAdmin();
+  if (authErr) return { error: authErr };
+
   if (!['admin', 'member'].includes(newRole)) return { error: 'Invalid role.' };
 
   const { error } = await supabaseAdmin
@@ -94,7 +131,8 @@ export async function changeRole(memberId: string, newRole: 'admin' | 'member') 
 }
 
 export async function removeMember(memberId: string) {
-  await requireAdmin();
+  const { error: authErr } = await requireAdmin();
+  if (authErr) return { error: authErr };
 
   // Fetch the member to check role before attempting deletion
   const { data: member } = await supabaseAdmin
@@ -127,14 +165,15 @@ export async function removeMember(memberId: string) {
 }
 
 export async function transferOwnership(newOwnerMemberId: string) {
-  const session = await requireAdmin();
-  if (session.user.orgRole !== 'owner') return { error: 'Only the current owner can transfer ownership.' };
+  const { error: authErr, session } = await requireAdmin();
+  if (authErr) return { error: authErr };
+  if (session!.user.orgRole !== 'owner') return { error: 'Only the current owner can transfer ownership.' };
 
   // Find the caller's own member record
   const { data: myMember } = await supabaseAdmin
     .from('org_members')
     .select('id, org_id')
-    .eq('user_id', session.user.id)
+    .eq('user_id', session!.user.id)
     .eq('role', 'owner')
     .single();
 
@@ -152,10 +191,10 @@ export async function transferOwnership(newOwnerMemberId: string) {
   if (newMember.role === 'owner') return { error: 'Already the owner.' };
 
   await Promise.all([
-    supabaseAdmin.from('org_members').update({ role: 'admin' }).eq('id', myMember.id),
-    supabaseAdmin.from('org_members').update({ role: 'owner' }).eq('id', newOwnerMemberId),
+    supabaseAdmin.from('org_members').update({ role: 'admin'  }).eq('id', myMember.id),
+    supabaseAdmin.from('org_members').update({ role: 'owner'  }).eq('id', newOwnerMemberId),
     supabaseAdmin.from('organizations').update({ owner_id: newMember.user_id }).eq('id', myMember.org_id),
-    supabaseAdmin.from('users').update({ org_role: 'admin' }).eq('id', session.user.id),
+    supabaseAdmin.from('users').update({ org_role: 'admin' }).eq('id', session!.user.id),
     supabaseAdmin.from('users').update({ org_role: 'owner' }).eq('id', newMember.user_id),
   ]);
 
@@ -164,7 +203,8 @@ export async function transferOwnership(newOwnerMemberId: string) {
 }
 
 export async function revokeInvite(inviteId: string) {
-  await requireAdmin();
+  const { error: authErr } = await requireAdmin();
+  if (authErr) return { error: authErr };
 
   const { error } = await supabaseAdmin
     .from('org_invites')

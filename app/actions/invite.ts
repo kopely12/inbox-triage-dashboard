@@ -20,6 +20,25 @@ export async function acceptInvite(token: string): Promise<{ error?: string; suc
   if (new Date(invite.expires_at) < new Date())        return { error: 'This invite has expired.' };
   if (invite.email !== session.user.email)             return { error: 'This invite was sent to a different email address.' };
 
+  // Enforce seat limit before accepting
+  const [{ data: org }, { count: activeCount }] = await Promise.all([
+    supabaseAdmin
+      .from('organizations')
+      .select('seat_count')
+      .eq('id', invite.org_id)
+      .single(),
+    supabaseAdmin
+      .from('org_members')
+      .select('*', { count: 'exact', head: true })
+      .eq('org_id', invite.org_id)
+      .eq('status', 'active'),
+  ]);
+
+  const seatCount = org?.seat_count ?? 0;
+  if (seatCount > 0 && (activeCount ?? 0) >= seatCount) {
+    return { error: 'This team has reached its seat limit. Ask the owner to upgrade the plan before you can join.' };
+  }
+
   const now = new Date().toISOString();
 
   // Add to org_members (upsert in case they somehow already have a row)

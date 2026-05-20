@@ -49,8 +49,8 @@ export async function createProCheckoutUrl(
     customer:    customerId,
     line_items:  [{ price: PRICES[priceKey], quantity: 1 }],
     mode:        'subscription',
-    success_url: `${BASE_URL}/account?upgraded=1`,
-    cancel_url:  `${BASE_URL}/account`,
+    success_url: `${BASE_URL}/billing?upgraded=1`,
+    cancel_url:  `${BASE_URL}/billing`,
     metadata:    { userId },
     subscription_data: { metadata: { userId } },
   });
@@ -134,7 +134,7 @@ export async function createPortalUrl(
 
   if (!customerId) return { error: 'No billing account found. Please subscribe first.' };
 
-  const returnUrl = scope === 'org' ? `${BASE_URL}/team` : `${BASE_URL}/account`;
+  const returnUrl = scope === 'org' ? `${BASE_URL}/team` : `${BASE_URL}/billing`;
 
   const portal = await stripe.billingPortal.sessions.create({
     customer:   customerId,

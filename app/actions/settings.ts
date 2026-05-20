@@ -3,6 +3,7 @@
 import { auth } from '@/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 import { revalidatePath } from 'next/cache';
+import { stripe } from '@/lib/stripe';
 
 const VALID_TIMEZONES = new Set([
   'UTC',
@@ -34,7 +35,7 @@ export async function updatePreferences(formData: FormData) {
     .eq('id', session.user.id);
 
   if (error) return { error: 'Failed to save preferences.' };
-  revalidatePath('/account');
+  revalidatePath('/preferences');
   return { success: true };
 }
 
@@ -75,7 +76,55 @@ export async function deleteAccount(): Promise<{ error?: string; success?: boole
 
   const userId = session.user.id;
 
-  // Delete user data in safe order (FK constraints handled by cascade, but be explicit)
+  // ── Guard: block if sole owner of any org ─────────────────────────────────
+  const { data: ownedMemberships } = await supabaseAdmin
+    .from('org_members')
+    .select('org_id')
+    .eq('user_id', userId)
+    .eq('org_role', 'owner')
+    .eq('status', 'active');
+
+  for (const { org_id } of ownedMemberships ?? []) {
+    const { count } = await supabaseAdmin
+      .from('org_members')
+      .select('*', { count: 'exact', head: true })
+      .eq('org_id', org_id)
+      .eq('org_role', 'owner')
+      .eq('status', 'active');
+
+    if ((count ?? 0) <= 1) {
+      return {
+        error:
+          'You are the sole owner of an organization. Transfer ownership or delete the organization before removing your account.',
+      };
+    }
+  }
+
+  // ── Cancel any active Stripe subscriptions ────────────────────────────────
+  if (stripe) {
+    const { data: userRow } = await supabaseAdmin
+      .from('users')
+      .select('stripe_customer_id')
+      .eq('id', userId)
+      .single();
+
+    if (userRow?.stripe_customer_id) {
+      try {
+        const { data: subs } = await stripe.subscriptions.list({
+          customer: userRow.stripe_customer_id as string,
+          status:   'active',
+          limit:    10,
+        });
+        await Promise.all(subs.map((sub) => stripe!.subscriptions.cancel(sub.id)));
+      } catch (err) {
+        // Log but don't block deletion — Stripe state can be reconciled later
+        console.error('[deleteAccount] Stripe cancellation error:', err);
+      }
+    }
+  }
+
+  // ── Delete user data in dependency order ──────────────────────────────────
+  await supabaseAdmin.from('user_preferences').delete().eq('user_id', userId);
   await supabaseAdmin.from('commitments').delete().eq('user_id', userId);
   await supabaseAdmin.from('triage_sessions').delete().eq('user_id', userId);
   await supabaseAdmin.from('org_members').delete().eq('user_id', userId);

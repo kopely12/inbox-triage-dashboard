@@ -37,6 +37,9 @@ export async function POST(req: NextRequest) {
       case 'invoice.payment_failed':
         await handlePaymentFailed(event.data.object as Stripe.Invoice);
         break;
+      case 'customer.deleted':
+        await handleCustomerDeleted(event.data.object as Stripe.Customer);
+        break;
     }
   } catch (err) {
     console.error(`Error handling ${event.type}:`, err);
@@ -51,9 +54,9 @@ export async function POST(req: NextRequest) {
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   if (session.mode !== 'subscription' || !session.subscription) return;
 
-  const subscriptionId     = session.subscription as string;
-  const customerId         = session.customer as string;
-  const { userId, orgId }  = session.metadata ?? {};
+  const subscriptionId    = session.subscription as string;
+  const customerId        = session.customer as string;
+  const { userId, orgId } = session.metadata ?? {};
 
   const sub       = await stripe!.subscriptions.retrieve(subscriptionId);
   const status    = sub.status;
@@ -65,10 +68,16 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   const priceId   = item?.price?.id ?? null;
 
   if (userId) {
-    // Individual Pro subscription
+    // Individual Pro subscription — save subscription ID so we can reference it
+    // directly without a Stripe list call (e.g. for cancellation, status checks).
     await supabaseAdmin
       .from('users')
-      .update({ plan_tier: 'pro', stripe_customer_id: customerId, stripe_price_id: priceId })
+      .update({
+        plan_tier:               'pro',
+        stripe_customer_id:      customerId,
+        stripe_subscription_id:  subscriptionId,
+        stripe_price_id:         priceId,
+      })
       .eq('id', userId);
   }
 
@@ -138,9 +147,12 @@ async function handleSubscriptionDeleted(sub: Stripe.Subscription) {
   const { userId, orgId } = sub.metadata ?? {};
 
   if (userId) {
+    // Clear the subscription ID along with plan downgrade.
+    // stripe_customer_id is intentionally preserved — the Stripe customer
+    // record still exists and is needed if the user re-subscribes later.
     await supabaseAdmin
       .from('users')
-      .update({ plan_tier: 'free', stripe_price_id: null })
+      .update({ plan_tier: 'free', stripe_price_id: null, stripe_subscription_id: null })
       .eq('id', userId);
   }
 
@@ -168,14 +180,15 @@ async function handleSubscriptionDeleted(sub: Stripe.Subscription) {
 
 async function handlePaymentFailed(invoice: Stripe.Invoice) {
   // In the dahlia API, subscription moved to invoice.parent.subscription_details.subscription
-  const subRef = invoice.parent?.subscription_details?.subscription;
+  const subRef = (invoice as any).parent?.subscription_details?.subscription
+    ?? (invoice as any).subscription; // fallback for older API versions
   if (!subRef) return;
 
   const subscriptionId = typeof subRef === 'string' ? subRef : subRef.id;
 
   // Retrieve the subscription to get metadata
   const sub = await stripe!.subscriptions.retrieve(subscriptionId);
-  const { orgId } = sub.metadata ?? {};
+  const { userId, orgId } = sub.metadata ?? {};
 
   if (orgId) {
     await supabaseAdmin
@@ -183,6 +196,36 @@ async function handlePaymentFailed(invoice: Stripe.Invoice) {
       .update({ subscription_status: 'past_due' })
       .eq('id', orgId);
   }
-  // For individual Pro users, customer.subscription.updated fires with
-  // status = 'past_due' automatically — no extra handling needed here.
+
+  if (userId) {
+    // Belt-and-suspenders: customer.subscription.updated fires with status='past_due'
+    // and our handler there sets plan_tier='free', but webhook delivery is best-effort.
+    // Handling it here ensures individual users are downgraded even if that event
+    // is delayed, deduplicated, or missed entirely.
+    await supabaseAdmin
+      .from('users')
+      .update({ plan_tier: 'free' })
+      .eq('id', userId);
+  }
+}
+
+// ── customer.deleted ──────────────────────────────────────────────────────────
+// Fired when a Stripe Customer object is deleted (e.g. via the API or dashboard).
+// The subscription.deleted event handles plan downgrade; this clears the stale
+// customer ID so a new Stripe customer is created on the next checkout.
+
+async function handleCustomerDeleted(customer: Stripe.Customer) {
+  const customerId = customer.id;
+
+  // Clear from individual users
+  await supabaseAdmin
+    .from('users')
+    .update({ stripe_customer_id: null, stripe_subscription_id: null })
+    .eq('stripe_customer_id', customerId);
+
+  // Clear from organizations
+  await supabaseAdmin
+    .from('organizations')
+    .update({ stripe_customer_id: null, stripe_subscription_id: null })
+    .eq('stripe_customer_id', customerId);
 }

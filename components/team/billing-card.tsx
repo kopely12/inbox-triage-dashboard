@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react';
 import { updateBillingEmail } from '@/app/actions/org-billing';
 import { createTeamCheckoutUrl, createPortalUrl } from '@/app/actions/billing';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -106,8 +106,12 @@ export function BillingCard({
       <CardHeader className="pb-3">
         <CardTitle className="text-sm font-medium flex items-center gap-2">
           <CreditCard className="w-4 h-4 text-muted-foreground" />
-          Billing
+          Team subscription
         </CardTitle>
+        <CardDescription>
+          Seat usage and billing for your organization. Personal billing is on the{' '}
+          <a href="/billing" className="underline underline-offset-2 hover:text-foreground">Billing page</a>.
+        </CardDescription>
       </CardHeader>
       <CardContent className="pt-0 space-y-4">
 
