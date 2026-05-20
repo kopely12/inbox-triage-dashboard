@@ -9,21 +9,21 @@ import { Badge }   from '@/components/ui/badge';
 import { Button }  from '@/components/ui/button';
 import { MarkDoneButton } from '@/components/commitments/commitment-row-actions';
 import {
-  CheckSquare, Clock, AlertTriangle, ArrowUpRight,
-  Inbox, ExternalLink, BarChart2, Zap, CalendarDays, Timer,
+  CheckSquare, AlertTriangle, ArrowUpRight,
+  Inbox, ExternalLink, CalendarDays, Timer, Clock, Zap,
 } from 'lucide-react';
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function relativeTime(iso: string): string {
   const ms   = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(ms / 60_000);
-  if (mins < 2)   return 'Just now';
-  if (mins < 60)  return `${mins}m ago`;
+  if (mins < 2)  return 'just now';
+  if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24)   return `${hrs}h ago`;
+  if (hrs < 24)  return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
-  if (days < 7)   return `${days}d ago`;
+  if (days < 7)  return `${days}d ago`;
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
@@ -32,10 +32,10 @@ function extensionHealth(lastTriageAt: string | null): {
 } {
   if (!lastTriageAt) return { label: 'Not connected', detail: 'No triage sessions found', variant: 'outline' };
   const daysAgo = (Date.now() - new Date(lastTriageAt).getTime()) / 86_400_000;
-  if (daysAgo < 1) return { label: 'Active',   detail: `Last triage ${relativeTime(lastTriageAt)}`,    variant: 'default' };
-  if (daysAgo < 3) return { label: 'Recent',   detail: `Last triage ${relativeTime(lastTriageAt)}`,    variant: 'secondary' };
-  if (daysAgo < 7) return { label: 'Idle',     detail: `Last triage ${Math.round(daysAgo)}d ago`,      variant: 'secondary' };
-  return               { label: 'Inactive', detail: `Last triage ${Math.round(daysAgo)}d ago`,      variant: 'destructive' };
+  if (daysAgo < 1) return { label: 'Active',   detail: `Last triage ${relativeTime(lastTriageAt)}`, variant: 'default'     };
+  if (daysAgo < 3) return { label: 'Recent',   detail: `Last triage ${relativeTime(lastTriageAt)}`, variant: 'secondary'   };
+  if (daysAgo < 7) return { label: 'Idle',     detail: `Last triage ${Math.round(daysAgo)}d ago`,   variant: 'secondary'   };
+  return               { label: 'Inactive', detail: `Last triage ${Math.round(daysAgo)}d ago`,   variant: 'destructive' };
 }
 
 function gmailThreadUrl(threadId: string | null) {
@@ -43,22 +43,33 @@ function gmailThreadUrl(threadId: string | null) {
   return `https://mail.google.com/mail/u/0/#all/${threadId}`;
 }
 
-// ─── page ─────────────────────────────────────────────────────────────────────
+function pageSubtitle(
+  overdue: number, dueThisWeek: number, resolvedThisWeek: number,
+): string {
+  if (overdue > 0) {
+    const noun = overdue === 1 ? 'commitment' : 'commitments';
+    return `${overdue} overdue ${noun} need${overdue === 1 ? 's' : ''} attention.`;
+  }
+  if (dueThisWeek > 0) {
+    const noun    = dueThisWeek === 1 ? 'commitment' : 'commitments';
+    const trailer = resolvedThisWeek > 0 ? ` · ${resolvedThisWeek} resolved this week.` : '.';
+    return `${dueThisWeek} ${noun} due this week${trailer}`;
+  }
+  if (resolvedThisWeek > 0) {
+    return `All caught up — ${resolvedThisWeek} resolved this week. Nice work.`;
+  }
+  return "Here's where things stand.";
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default async function OverviewPage() {
   const session = await auth();
   if (!session?.user?.id) redirect('/login');
   const userId = session.user.id;
 
-  // ── Date windows ──────────────────────────────────────────────────────────
-  const now  = new Date();
+  const now   = new Date();
   const today = new Date(now); today.setHours(0, 0, 0, 0);
-
-  const overdueThreshold = new Date(now);
-  overdueThreshold.setUTCDate(overdueThreshold.getUTCDate() - 14);
-
-  const thirtyDaysAgo = new Date(now);
-  thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
 
   const sevenDaysAgo = new Date(now);
   sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 7);
@@ -68,14 +79,14 @@ export default async function OverviewPage() {
   const dow = today.getDay(); // 0 = Sunday
   endOfWeek.setDate(today.getDate() + (dow === 0 ? 0 : 7 - dow));
 
-  const todayISO      = today.toISOString().slice(0, 10);
-  const endOfWeekISO  = endOfWeek.toISOString().slice(0, 10);
-  const sevenAgoISO   = sevenDaysAgo.toISOString();
+  const todayISO     = today.toISOString().slice(0, 10);
+  const endOfWeekISO = endOfWeek.toISOString().slice(0, 10);
+  const sevenAgoISO  = sevenDaysAgo.toISOString();
 
-  // ── Week label (e.g. "May 19–25") ────────────────────────────────────────
-  const weekLabel = `${today.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}–${endOfWeek.toLocaleDateString('en-US', { day: 'numeric' })}`;
+  const weekLabel = `${today.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}–${
+    endOfWeek.toLocaleDateString('en-US', { day: 'numeric' })}`;
 
-  // ── Parallel DB fetches ───────────────────────────────────────────────────
+  // ── Parallel DB fetches ───────────────────────────────────────────────────────
   const [
     { data: lastSession },
     { count: openCount },
@@ -83,126 +94,192 @@ export default async function OverviewPage() {
     { count: dueThisWeekCount },
     { count: resolvedThisWeekCount },
     { data: urgentItems },
-    { data: sessionStats },
-    waitingResult,
+    waitingCountResult,
+    waitingItemsResult,
   ] = await Promise.all([
+
     // Last triage session
     supabaseAdmin
       .from('triage_sessions')
-      .select('triggered_at, emails_scanned, emails_surfaced')
+      .select('triggered_at')
       .eq('user_id', userId)
       .order('triggered_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
 
-    // Total open commitments (outgoing + assigned only; incoming/cold now in waiting_items)
+    // All open commitments
     supabaseAdmin.from('commitments')
       .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId).eq('status', 'open')
-      .in('direction', ['outgoing', 'assigned']),
+      .eq('user_id', userId)
+      .eq('status', 'open'),
 
-    // Overdue
+    // Overdue: explicit due_date in the past only (no scanned_at fallback)
     supabaseAdmin.from('commitments')
       .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId).eq('status', 'open')
-      .in('direction', ['outgoing', 'assigned'])
-      .or(`due_date.lt.${todayISO},scanned_at.lte.${overdueThreshold.toISOString()}`),
+      .eq('user_id', userId)
+      .eq('status', 'open')
+      .not('due_date', 'is', null)
+      .lt('due_date', todayISO),
 
-    // Due this week (has an explicit due_date between today and Sunday)
+    // Due this week (today → end of week)
     supabaseAdmin.from('commitments')
       .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId).eq('status', 'open').eq('direction', 'outgoing')
+      .eq('user_id', userId)
+      .eq('status', 'open')
       .gte('due_date', todayISO)
       .lte('due_date', endOfWeekISO),
 
     // Resolved in the last 7 days
     supabaseAdmin.from('commitments')
       .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId).eq('status', 'done')
+      .eq('user_id', userId)
+      .eq('status', 'done')
       .gte('resolved_at', sevenAgoISO),
 
-    // Urgent item list: overdue + due this week, up to 6 (outgoing + assigned only)
+    // Urgent list: items with a due_date up to end of week (overdue + due soon)
     supabaseAdmin.from('commitments')
-      .select('id, direction, description, counterparty, counterparty_email, due_date, thread_id, scanned_at, status')
-      .eq('user_id', userId).eq('status', 'open')
-      .in('direction', ['outgoing', 'assigned'])
-      .or(`due_date.lte.${endOfWeekISO},scanned_at.lte.${overdueThreshold.toISOString()}`)
-      .order('due_date', { ascending: true, nullsFirst: false })
-      .order('scanned_at', { ascending: true })
+      .select('id, direction, description, counterparty, counterparty_email, due_date, thread_id, status')
+      .eq('user_id', userId)
+      .eq('status', 'open')
+      .not('due_date', 'is', null)
+      .lte('due_date', endOfWeekISO)
+      .order('due_date', { ascending: true })
       .limit(6),
 
-    // 30-day triage stats
-    supabaseAdmin.from('triage_sessions')
-      .select('emails_scanned, emails_surfaced')
-      .eq('user_id', userId)
-      .gte('triggered_at', thirtyDaysAgo.toISOString()),
-
-    // Active waiting items (graceful if table doesn't exist)
+    // Waiting items — count only (graceful if table absent)
     supabaseAdmin.from('waiting_items')
       .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId).eq('status', 'active')
+      .eq('user_id', userId)
+      .eq('status', 'active')
       .then((r) => r, () => ({ count: null, data: null, error: null })),
+
+    // Waiting items — list (graceful if table or columns absent)
+    supabaseAdmin.from('waiting_items')
+      .select('id, subject, counterparty, thread_id, sent_at, created_at')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: true })
+      .limit(5)
+      .then((r) => r, () => ({ data: null, error: null })),
   ]);
 
-  const health         = extensionHealth(lastSession?.triggered_at ?? null);
-  const scanned30d     = (sessionStats ?? []).reduce((a: number, s: any) => a + (s.emails_scanned  ?? 0), 0);
-  const surfaced30d    = (sessionStats ?? []).reduce((a: number, s: any) => a + (s.emails_surfaced ?? 0), 0);
-  const triages30d     = (sessionStats ?? []).length;
-  const waitingCount   = (waitingResult as any)?.count ?? null;
+  const health       = extensionHealth(lastSession?.triggered_at ?? null);
+  const waitingCount = (waitingCountResult  as any)?.count ?? null;
+  const waitingItems = (waitingItemsResult  as any)?.data  ?? null;
 
-  // Categorise urgent items
-  const urgentList = (urgentItems ?? []).map((c: any) => {
-    const dueDateTs = c.due_date ? new Date(c.due_date + 'T00:00:00').getTime() : null;
-    const isOverdue = (dueDateTs !== null && dueDateTs < today.getTime()) ||
-                      new Date(c.scanned_at) <= overdueThreshold;
-    return { ...c, isOverdue };
-  }).sort((a: any, b: any) => {
-    // Overdue first, then by due_date asc
-    if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
-    if (a.due_date && b.due_date) return a.due_date.localeCompare(b.due_date);
-    return 0;
-  });
+  // Categorise urgent items: overdue vs due-soon
+  const urgentList = (urgentItems ?? [])
+    .map((c: any) => ({ ...c, isOverdue: !!c.due_date && c.due_date < todayISO }))
+    .sort((a: any, b: any) => {
+      if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
+      return (a.due_date ?? '').localeCompare(b.due_date ?? '');
+    });
 
-  const name = session.user.name?.split(' ')[0] ?? 'there';
-  const hasWeekActivity = (overdueCount ?? 0) > 0 || (dueThisWeekCount ?? 0) > 0 ||
-                          (resolvedThisWeekCount ?? 0) > 0 || (waitingCount ?? 0) > 0;
+  const name        = session.user.name?.split(' ')[0] ?? 'there';
+  const hasSession  = !!lastSession;
 
-  return (
-    <div className="max-w-7xl space-y-6">
+  const overdue          = overdueCount         ?? 0;
+  const dueThisWeek      = dueThisWeekCount     ?? 0;
+  const resolvedThisWeek = resolvedThisWeekCount ?? 0;
 
-      {/* Greeting */}
-      <div>
-        <h2 className="text-lg font-semibold">Hey, {name}</h2>
-        <p className="text-sm text-muted-foreground">
-          {lastSession ? "Here's where things stand." : "Welcome to Inbox Triage — let's get you set up."}
-        </p>
-      </div>
+  const hasWeekActivity = overdue > 0 || dueThisWeek > 0 || resolvedThisWeek > 0 || (waitingCount ?? 0) > 0;
 
-      {/* Status row */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        {/* Extension health */}
-        <Card className="col-span-2">
-          <CardContent className="pt-5">
-            <div className="flex items-start gap-3">
-              <div className="flex items-center justify-center w-8 h-8 rounded-md bg-muted shrink-0">
-                <Zap className="w-4 h-4 text-muted-foreground" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs text-muted-foreground">Extension</p>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <Badge variant={health.variant} className="text-[10px] py-0">{health.label}</Badge>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">{health.detail}</p>
-                {!lastSession && (
-                  <a href="https://chromewebstore.google.com" target="_blank" rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-1">
-                    Install extension <ExternalLink className="w-2.5 h-2.5" />
-                  </a>
-                )}
-              </div>
-            </div>
+  // ── New user: onboarding as primary content ──────────────────────────────────
+  if (!hasSession) {
+    return (
+      <div className="max-w-4xl space-y-6">
+        <div>
+          <h2 className="text-lg font-semibold">Hey, {name}</h2>
+          <p className="text-sm text-muted-foreground">Welcome — let's get you set up.</p>
+        </div>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium">Get started in 3 steps</CardTitle>
+            <CardDescription>
+              Inbox Triage works from a Chrome extension — the dashboard fills in automatically after your first scan.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ol className="space-y-4">
+              {[
+                {
+                  step: '1',
+                  title: 'Install the Chrome extension',
+                  detail: 'Add Inbox Triage from the Chrome Web Store.',
+                  action: (
+                    <a href="https://chromewebstore.google.com" target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-1">
+                      Open Chrome Web Store <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  ),
+                },
+                {
+                  step: '2',
+                  title: 'Open Gmail and run a triage',
+                  detail: 'Click the extension icon, then press "Run triage" to scan your inbox.',
+                  action: (
+                    <a href="https://mail.google.com" target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-1">
+                      Open Gmail <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  ),
+                },
+                {
+                  step: '3',
+                  title: 'Come back here',
+                  detail: 'Your commitments, activity stats, and analytics will appear after your first scan.',
+                  action: null,
+                },
+              ].map(({ step, title, detail, action }) => (
+                <li key={step} className="flex items-start gap-3">
+                  <div className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-semibold shrink-0 mt-0.5">
+                    {step}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">{title}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>
+                    {action}
+                  </div>
+                </li>
+              ))}
+            </ol>
           </CardContent>
         </Card>
+      </div>
+    );
+  }
+
+  // ── Returning user: full dashboard ───────────────────────────────────────────
+  return (
+    <div className="max-w-4xl space-y-6">
+
+      {/* Greeting + inline extension health */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold">Hey, {name}</h2>
+          <p className="text-sm text-muted-foreground">
+            {pageSubtitle(overdue, dueThisWeek, resolvedThisWeek)}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
+          <Zap className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+          <Badge variant={health.variant} className="text-[10px] py-0">{health.label}</Badge>
+          <span className="text-xs text-muted-foreground hidden sm:inline">{health.detail}</span>
+          {health.variant === 'destructive' && (
+            <a
+              href="https://mail.google.com/?inbox_triage_run=1"
+              target="_blank" rel="noopener noreferrer"
+              className="text-xs text-primary hover:underline"
+            >
+              Run now
+            </a>
+          )}
+        </div>
+      </div>
+
+      {/* Stat cards */}
+      <div className="grid grid-cols-3 gap-4">
 
         {/* Open */}
         <Card>
@@ -214,57 +291,81 @@ export default async function OverviewPage() {
               <div>
                 <p className="text-xs text-muted-foreground">Open</p>
                 <p className="text-2xl font-semibold">{openCount ?? 0}</p>
-                <p className="text-xs text-muted-foreground">commitments</p>
+                {resolvedThisWeek > 0 ? (
+                  <p className="text-xs text-green-600 dark:text-green-400">
+                    ↓ {resolvedThisWeek} resolved this week
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">commitments</p>
+                )}
               </div>
             </div>
           </CardContent>
         </Card>
 
         {/* Overdue */}
-        <Card className={(overdueCount ?? 0) > 0 ? 'border-red-200 dark:border-red-900' : ''}>
+        <Card className={overdue > 0 ? 'border-red-200 dark:border-red-900' : ''}>
           <CardContent className="pt-5">
             <div className="flex items-start gap-3">
               <div className={[
                 'flex items-center justify-center w-8 h-8 rounded-md shrink-0',
-                (overdueCount ?? 0) > 0 ? 'bg-red-50 dark:bg-red-950' : 'bg-muted',
+                overdue > 0 ? 'bg-red-50 dark:bg-red-950' : 'bg-muted',
               ].join(' ')}>
                 <AlertTriangle className={[
                   'w-4 h-4',
-                  (overdueCount ?? 0) > 0 ? 'text-red-500' : 'text-muted-foreground',
+                  overdue > 0 ? 'text-red-500' : 'text-muted-foreground',
                 ].join(' ')} />
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Overdue</p>
-                <p className={['text-2xl font-semibold', (overdueCount ?? 0) > 0 ? 'text-red-600 dark:text-red-400' : ''].join(' ')}>
-                  {overdueCount ?? 0}
+                <p className={[
+                  'text-2xl font-semibold',
+                  overdue > 0 ? 'text-red-600 dark:text-red-400' : '',
+                ].join(' ')}>{overdue}</p>
+                <p className="text-xs text-muted-foreground">
+                  {overdue > 0 ? 'need attention' : 'all on track'}
                 </p>
-                <p className="text-xs text-muted-foreground">commitments</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Due this week */}
+        <Card>
+          <CardContent className="pt-5">
+            <div className="flex items-start gap-3">
+              <div className="flex items-center justify-center w-8 h-8 rounded-md bg-muted shrink-0">
+                <CalendarDays className="w-4 h-4 text-muted-foreground" />
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Due this week</p>
+                <p className="text-2xl font-semibold">{dueThisWeek}</p>
+                <p className="text-xs text-muted-foreground">
+                  by {endOfWeek.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                </p>
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Quick links */}
-      <div className="flex gap-3 flex-wrap">
+      {/* Quick actions */}
+      <div className="flex gap-2 flex-wrap">
         <Button asChild variant="default" size="sm" className="gap-1.5">
           <a href="https://mail.google.com/?inbox_triage_run=1" target="_blank" rel="noopener noreferrer">
             <Inbox className="w-3.5 h-3.5" /> Run Triage
           </a>
         </Button>
-        <Button asChild variant="outline" size="sm" className="gap-1.5">
-          <Link href="/commitments?status=overdue">
-            <AlertTriangle className="w-3.5 h-3.5" /> Review overdue
-          </Link>
-        </Button>
-        <Button asChild variant="outline" size="sm" className="gap-1.5">
-          <Link href="/analytics">
-            <BarChart2 className="w-3.5 h-3.5" /> Analytics
-          </Link>
-        </Button>
+        {overdue > 0 && (
+          <Button asChild variant="outline" size="sm" className="gap-1.5">
+            <Link href="/commitments?status=overdue">
+              <AlertTriangle className="w-3.5 h-3.5" /> Review {overdue} overdue
+            </Link>
+          </Button>
+        )}
       </div>
 
-      {/* ── My Week digest ─────────────────────────────────────────────────── */}
+      {/* My Week */}
       {hasWeekActivity && (
         <Card>
           <CardHeader className="pb-3">
@@ -285,24 +386,24 @@ export default async function OverviewPage() {
 
             {/* Stat chips */}
             <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm pb-3 border-b border-border">
-              {(overdueCount ?? 0) > 0 && (
+              {overdue > 0 && (
                 <Link href="/commitments?status=overdue"
                   className="flex items-center gap-1.5 text-red-600 dark:text-red-400 hover:underline">
                   <AlertTriangle className="w-3.5 h-3.5" />
-                  <strong>{overdueCount}</strong> overdue
+                  <strong>{overdue}</strong> overdue
                 </Link>
               )}
-              {(dueThisWeekCount ?? 0) > 0 && (
-                <Link href="/commitments?status=open"
+              {dueThisWeek > 0 && (
+                <Link href="/commitments?status=open&sort=due"
                   className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 hover:underline">
                   <Timer className="w-3.5 h-3.5" />
-                  <strong>{dueThisWeekCount}</strong> due by {endOfWeek.toLocaleDateString('en-US', { weekday: 'short' })}
+                  <strong>{dueThisWeek}</strong> due by {endOfWeek.toLocaleDateString('en-US', { weekday: 'short' })}
                 </Link>
               )}
-              {(resolvedThisWeekCount ?? 0) > 0 && (
+              {resolvedThisWeek > 0 && (
                 <span className="flex items-center gap-1.5 text-green-600 dark:text-green-400">
                   <CheckSquare className="w-3.5 h-3.5" />
-                  <strong>{resolvedThisWeekCount}</strong> resolved
+                  <strong>{resolvedThisWeek}</strong> resolved
                 </span>
               )}
               {waitingCount !== null && waitingCount > 0 && (
@@ -313,27 +414,26 @@ export default async function OverviewPage() {
               )}
             </div>
 
-            {/* Urgent item list */}
+            {/* Urgent list — actions always visible */}
             {urgentList.length > 0 && (
               <div className="divide-y divide-border">
                 {urgentList.map((c: any) => {
                   const counterparty = c.counterparty || c.counterparty_email || '—';
-                  const gmailUrl     = gmailThreadUrl(c.thread_id);
+                  const gmail        = gmailThreadUrl(c.thread_id);
                   const dueDateLabel = c.due_date
-                    ? new Date(c.due_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+                    ? new Date(c.due_date + 'T00:00:00').toLocaleDateString('en-US', {
+                        weekday: 'short', month: 'short', day: 'numeric',
+                      })
                     : null;
 
                   return (
-                    <div key={c.id} className="flex items-start gap-3 py-2.5 group">
-                      {/* Urgency indicator */}
+                    <div key={c.id} className="flex items-start gap-3 py-2.5">
                       <span className="mt-0.5 shrink-0">
                         {c.isOverdue
                           ? <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
-                          : <Timer className="w-3.5 h-3.5 text-amber-500" />
-                        }
+                          : <Timer        className="w-3.5 h-3.5 text-amber-500" />}
                       </span>
 
-                      {/* Content */}
                       <div className="flex-1 min-w-0">
                         <p className="text-sm truncate">{c.description}</p>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
@@ -342,21 +442,22 @@ export default async function OverviewPage() {
                             <span className="font-medium text-foreground">{counterparty}</span>
                           </span>
                           {dueDateLabel && (
-                            <span className={c.isOverdue ? 'text-red-500 font-medium' : 'text-amber-600 dark:text-amber-400'}>
+                            <span className={
+                              c.isOverdue
+                                ? 'text-red-500 font-medium'
+                                : 'text-amber-600 dark:text-amber-400'
+                            }>
                               Due {dueDateLabel}
                             </span>
-                          )}
-                          {!dueDateLabel && c.isOverdue && (
-                            <span className="text-red-500 font-medium">Overdue</span>
                           )}
                         </div>
                       </div>
 
-                      {/* Actions */}
-                      <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {gmailUrl && (
-                          <Button asChild variant="ghost" size="sm" className="h-6 px-1.5 text-xs gap-1">
-                            <a href={gmailUrl} target="_blank" rel="noopener noreferrer">
+                      {/* Always visible — no hover-only opacity */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {gmail && (
+                          <Button asChild variant="ghost" size="icon-sm" title="View in Gmail">
+                            <a href={gmail} target="_blank" rel="noopener noreferrer">
                               <ExternalLink className="w-3 h-3" />
                             </a>
                           </Button>
@@ -368,89 +469,57 @@ export default async function OverviewPage() {
                 })}
               </div>
             )}
-
           </CardContent>
         </Card>
       )}
 
-      {/* Onboarding */}
-      {!lastSession && (
+      {/* Waiting on replies */}
+      {waitingItems && waitingItems.length > 0 && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium">Get started in 3 steps</CardTitle>
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Clock className="w-4 h-4 text-muted-foreground" />
+              Waiting on replies
+            </CardTitle>
             <CardDescription>
-              Inbox Triage works from a Chrome extension — the dashboard fills in automatically after your first scan.
+              Emails you've sent where a reply is still expected.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <ol className="space-y-4">
-              {[
-                {
-                  step: '1', title: 'Install the Chrome extension',
-                  detail: 'Add Inbox Triage from the Chrome Web Store.',
-                  action: (
-                    <a href="https://chromewebstore.google.com" target="_blank" rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-1">
-                      Open Chrome Web Store <ExternalLink className="w-2.5 h-2.5" />
-                    </a>
-                  ),
-                },
-                {
-                  step: '2', title: 'Open Gmail and run a triage',
-                  detail: 'Click the extension icon, then press "Run triage" to scan your inbox.',
-                  action: (
-                    <a href="https://mail.google.com" target="_blank" rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-1">
-                      Open Gmail <ExternalLink className="w-2.5 h-2.5" />
-                    </a>
-                  ),
-                },
-                {
-                  step: '3', title: 'Come back here',
-                  detail: 'Your commitments, activity stats, and analytics will appear after your first scan.',
-                  action: null,
-                },
-              ].map(({ step, title, detail, action }) => (
-                <li key={step} className="flex items-start gap-3">
-                  <div className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-semibold shrink-0 mt-0.5">
-                    {step}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">{title}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>
-                    {action}
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </CardContent>
-        </Card>
-      )}
+          <CardContent className="pt-0">
+            <div className="divide-y divide-border">
+              {waitingItems.map((w: any) => {
+                const gmail = gmailThreadUrl(w.thread_id);
+                const since = w.sent_at || w.created_at;
 
-      {/* 30-day triage summary */}
-      {triages30d > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Last 30 days</CardTitle>
-            <CardDescription>Triage activity from the extension.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-3 gap-4">
-              {[
-                { label: 'Triages',        value: triages30d },
-                { label: 'Emails scanned', value: scanned30d.toLocaleString() },
-                { label: 'Surfaced',       value: surfaced30d.toLocaleString() },
-              ].map(({ label, value }) => (
-                <div key={label}>
-                  <p className="text-xs text-muted-foreground">{label}</p>
-                  <p className="text-2xl font-semibold mt-0.5">{value}</p>
-                </div>
-              ))}
+                return (
+                  <div key={w.id} className="flex items-start gap-3 py-2.5">
+                    <Clock className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm truncate">{w.subject ?? '(no subject)'}</p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                        {w.counterparty && (
+                          <span>
+                            Waiting on{' '}
+                            <span className="font-medium text-foreground">{w.counterparty}</span>
+                          </span>
+                        )}
+                        {since && <span>{relativeTime(since)}</span>}
+                      </div>
+                    </div>
+                    {gmail && (
+                      <Button asChild variant="ghost" size="icon-sm" title="View in Gmail">
+                        <a href={gmail} target="_blank" rel="noopener noreferrer">
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
       )}
-
     </div>
   );
 }
