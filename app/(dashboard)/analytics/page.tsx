@@ -241,7 +241,7 @@ export default async function AnalyticsPage({
   // ── Parallel fetches ───────────────────────────────────────────────────────
   const [
     { data: sessionsRaw },
-    { data: allTimeResult },
+    { count: allTimeTriagesCount },
     { data: heatmapSessionsRaw },
     { data: outgoingInRangeRaw },
     { data: outgoingOpenAllRaw },
@@ -318,7 +318,7 @@ export default async function AnalyticsPage({
 
   const sessions       = sessionsRaw ?? [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const allTimeTriages = (allTimeResult as any)?.count ?? 0;
+  const allTimeTriages = allTimeTriagesCount ?? 0;
 
   // ── Empty state ────────────────────────────────────────────────────────────
   if (allTimeTriages === 0) {
