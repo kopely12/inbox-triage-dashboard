@@ -5,9 +5,8 @@ import {
   Card, CardContent, CardHeader, CardTitle, CardDescription,
 } from '@/components/ui/card';
 import { Badge }  from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { pinSender, suppressSender, clearSenderRule } from '@/app/actions/senders';
-import { Pin, EyeOff, X, Info } from 'lucide-react';
+import { Pin, EyeOff, Info } from 'lucide-react';
+import { SenderRuleButtons, ClearRuleButton } from '@/components/settings/sender-rule-buttons';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -158,36 +157,11 @@ export default async function SettingsPage() {
 
                     {/* Actions */}
                     <div className="flex items-center gap-1 shrink-0">
-                      {ruleVal ? (
-                        /* Clear existing rule */
-                        <form action={clearSenderRule}>
-                          <input type="hidden" name="sender_email"  value={s.sender_email  ?? ''} />
-                          <input type="hidden" name="sender_domain" value={s.sender_domain ?? ''} />
-                          <Button variant="ghost" size="sm" type="submit"
-                            className="h-7 px-2 text-xs gap-1 text-muted-foreground">
-                            <X className="w-3 h-3" /> Clear
-                          </Button>
-                        </form>
-                      ) : (
-                        <>
-                          <form action={pinSender}>
-                            <input type="hidden" name="sender_email"  value={s.sender_email  ?? ''} />
-                            <input type="hidden" name="sender_domain" value={s.sender_domain ?? ''} />
-                            <Button variant="ghost" size="sm" type="submit"
-                              className="h-7 px-2 text-xs gap-1" title="Always surface this sender">
-                              <Pin className="w-3 h-3" /> Pin
-                            </Button>
-                          </form>
-                          <form action={suppressSender}>
-                            <input type="hidden" name="sender_email"  value={s.sender_email  ?? ''} />
-                            <input type="hidden" name="sender_domain" value={s.sender_domain ?? ''} />
-                            <Button variant="ghost" size="sm" type="submit"
-                              className="h-7 px-2 text-xs gap-1 text-muted-foreground" title="Never surface this sender">
-                              <EyeOff className="w-3 h-3" /> Suppress
-                            </Button>
-                          </form>
-                        </>
-                      )}
+                      <SenderRuleButtons
+                        email={s.sender_email ?? null}
+                        domain={s.sender_domain ?? null}
+                        ruleVal={ruleVal}
+                      />
                     </div>
                   </div>
                 </div>
@@ -219,14 +193,10 @@ export default async function SettingsPage() {
                       <span className="text-xs text-muted-foreground capitalize">{r.created_from}</span>
                     )}
                   </div>
-                  <form action={clearSenderRule}>
-                    <input type="hidden" name="sender_email"  value={r.sender_email  ?? ''} />
-                    <input type="hidden" name="sender_domain" value={r.sender_domain ?? ''} />
-                    <Button variant="ghost" size="sm" type="submit"
-                      className="h-7 px-2 text-xs gap-1 text-muted-foreground">
-                      <X className="w-3 h-3" /> Remove
-                    </Button>
-                  </form>
+                  <ClearRuleButton
+                    email={r.sender_email ?? null}
+                    domain={r.sender_domain ?? null}
+                  />
                 </div>
               );
             })}
