@@ -333,7 +333,7 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
     <div className="space-y-6">
 
       {/* ── 1. Triage ──────────────────────────────────────────────────────── */}
-      <Card>
+      <Card id="triage" className="scroll-mt-4">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium">Triage</CardTitle>
           <CardDescription>How many emails to scan and when to run automatically.</CardDescription>
@@ -392,7 +392,7 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
       </Card>
 
       {/* ── 2. Email scanning ─────────────────────────────────────────────── */}
-      <Card>
+      <Card id="email-scanning" className="scroll-mt-4">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium">Email scanning</CardTitle>
           <CardDescription>Control which emails are included in each triage run.</CardDescription>
@@ -416,7 +416,7 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
       </Card>
 
       {/* ── 3. Sender rules ──────────────────────────────────────────────── */}
-      <Card>
+      <Card id="sender-rules" className="scroll-mt-4">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium">Sender rules</CardTitle>
           <CardDescription>Override how specific senders are treated — regardless of their learned score.</CardDescription>
@@ -440,7 +440,7 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
       </Card>
 
       {/* ── 4. AI & context ──────────────────────────────────────────────── */}
-      <Card>
+      <Card id="ai-context" className="scroll-mt-4">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium">AI & context</CardTitle>
           <CardDescription>Extra context injected into every triage prompt. The more you share, the smarter the prioritisation.</CardDescription>
@@ -462,7 +462,7 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
       </Card>
 
       {/* ── 5. Tasks & commitments ────────────────────────────────────────── */}
-      <Card>
+      <Card id="tasks" className="scroll-mt-4">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium">Tasks & commitments</CardTitle>
           <CardDescription>Control how the extension tracks what you owe and what you&apos;re owed.</CardDescription>
@@ -484,7 +484,7 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
       </Card>
 
       {/* ── 6. Interface ─────────────────────────────────────────────────── */}
-      <Card>
+      <Card id="interface" className="scroll-mt-4">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium">Interface</CardTitle>
           <CardDescription>Keyboard shortcuts, layout, and appearance.</CardDescription>

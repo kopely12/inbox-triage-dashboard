@@ -63,7 +63,7 @@ export default async function PreferencesPage() {
       </div>
 
       {/* Extension scan preferences */}
-      <div id="extension" className="scroll-mt-4">
+      <div>
         <ExtensionPrefsForm initialPrefs={extensionPrefs} />
       </div>
 
