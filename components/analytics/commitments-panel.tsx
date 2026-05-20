@@ -20,7 +20,8 @@ export function CommitmentsPanel({
   keptRate,
   overdueCount,
   openCount,
-  avgCompletionRate,
+  avgResolutionDays,
+  fulfillmentTrend,
   rangeLabel,
   thisWeekCreated,
   lastWeekCreated,
@@ -29,7 +30,8 @@ export function CommitmentsPanel({
   keptRate:          number | null;
   overdueCount:      number;
   openCount:         number;
-  avgCompletionRate: number | null;
+  avgResolutionDays: number | null;
+  fulfillmentTrend:  number | null;
   rangeLabel:        string;
   thisWeekCreated:   number;
   lastWeekCreated:   number;
@@ -65,6 +67,17 @@ export function CommitmentsPanel({
                   style={{ width: `${keptRate}%` }}
                 />
               </div>
+              {fulfillmentTrend !== null && (
+                <p className={cn(
+                  'text-xs font-medium',
+                  fulfillmentTrend > 0 ? 'text-green-600 dark:text-green-400' :
+                  fulfillmentTrend < 0 ? 'text-red-500' : 'text-muted-foreground',
+                )}>
+                  {fulfillmentTrend > 0 ? `↑ +${fulfillmentTrend}pts` :
+                   fulfillmentTrend < 0 ? `↓ ${fulfillmentTrend}pts` : '→ stable'}{' '}
+                  vs prior period
+                </p>
+              )}
               <p className="text-xs text-muted-foreground">
                 {keptRate >= 80 ? 'Great track record' : keptRate >= 50 ? 'Room to improve' : 'Needs attention'}
               </p>
@@ -77,13 +90,19 @@ export function CommitmentsPanel({
           )}
         </div>
 
-        {/* Avg weekly completion */}
+        {/* Avg time to close */}
         <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">Avg weekly rate</p>
+          <p className="text-xs text-muted-foreground">Avg time to close</p>
           <p className="text-2xl font-semibold">
-            {avgCompletionRate !== null ? `${avgCompletionRate}%` : '—'}
+            {avgResolutionDays !== null ? (
+              avgResolutionDays < 1 ? '<1d' :
+              avgResolutionDays < 7 ? `${Math.round(avgResolutionDays)}d` :
+              `${(avgResolutionDays / 7).toFixed(1)}w`
+            ) : '—'}
           </p>
-          <p className="text-xs text-muted-foreground">resolved per week</p>
+          <p className="text-xs text-muted-foreground">
+            {avgResolutionDays !== null ? 'from detection to done' : 'no resolved data'}
+          </p>
         </div>
 
         {/* Open */}
@@ -127,9 +146,6 @@ export function CommitmentsPanel({
         <div>
           <p className="text-xs text-muted-foreground mb-2">
             Commitments created vs. resolved per week — {rangeLabel}.
-            {avgCompletionRate !== null && (
-              <span className="ml-1 font-medium text-foreground">Avg {avgCompletionRate}% resolved</span>
-            )}
           </p>
           <ChartContainer config={chartConfig} className="h-44 w-full">
             <LineChart data={chartData}>

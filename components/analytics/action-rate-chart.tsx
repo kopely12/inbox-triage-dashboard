@@ -84,6 +84,9 @@ export function ActionRateChart({ data }: { data: ActionBreakdown }) {
       <p className={cn('text-xs font-medium pt-1 border-t border-border', signal.cls)}>
         {signal.text} — {replyRate}% reply rate across {total} surfaced emails
       </p>
+      <p className="text-xs text-muted-foreground pt-1 border-t border-border mt-1">
+        Recorded in the extension sidebar only — direct Gmail replies aren't captured.
+      </p>
     </div>
   );
 }

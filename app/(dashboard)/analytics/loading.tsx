@@ -1,12 +1,10 @@
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 
 function Bone({ className = '' }: { className?: string }) {
-  return (
-    <div className={`rounded-md bg-muted animate-pulse ${className}`} />
-  );
+  return <div className={`rounded-md bg-muted animate-pulse ${className}`} />;
 }
 
-function ChartCardSkeleton({ tall = false }: { tall?: boolean }) {
+function ChartCard({ tall = false }: { tall?: boolean }) {
   return (
     <Card>
       <CardHeader className="pb-2 space-y-1.5">
@@ -14,7 +12,7 @@ function ChartCardSkeleton({ tall = false }: { tall?: boolean }) {
         <Bone className="h-3 w-56" />
       </CardHeader>
       <CardContent>
-        <Bone className={tall ? 'h-52 w-full' : 'h-36 w-full'} />
+        <Bone className={tall ? 'h-52 w-full' : 'h-40 w-full'} />
       </CardContent>
     </Card>
   );
@@ -22,7 +20,7 @@ function ChartCardSkeleton({ tall = false }: { tall?: boolean }) {
 
 export default function AnalyticsLoading() {
   return (
-    <div className="max-w-7xl space-y-6">
+    <div className="max-w-4xl space-y-8">
       {/* Header + range toggle */}
       <div className="flex items-center justify-between">
         <div className="space-y-1.5">
@@ -31,10 +29,13 @@ export default function AnalyticsLoading() {
         </div>
         <Bone className="h-8 w-52 rounded-lg" />
       </div>
-
+      {/* Insights strip */}
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {[0,1,2].map((i) => <Bone key={i} className="h-14 w-full rounded-md" />)}
+      </div>
       {/* Stat tiles */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
+        {[0,1,2,3].map((i) => (
           <Card key={i}>
             <CardContent className="pt-5">
               <div className="flex items-start gap-3">
@@ -49,43 +50,30 @@ export default function AnalyticsLoading() {
           </Card>
         ))}
       </div>
-
-      {/* Full-width charts */}
-      <ChartCardSkeleton tall />
-      <div className="grid gap-6 lg:grid-cols-2">
-        <ChartCardSkeleton />
-        <ChartCardSkeleton />
+      {/* Triage section */}
+      <div className="space-y-5">
+        <Bone className="h-4 w-32" />
+        <ChartCard tall />
+        <div className="grid gap-5 lg:grid-cols-2">
+          <ChartCard />
+          <ChartCard />
+        </div>
+        <ChartCard />
       </div>
-      <ChartCardSkeleton />
-      <ChartCardSkeleton />
-
-      {/* This week vs last */}
-      <Card>
-        <CardHeader className="pb-2 space-y-1.5">
-          <Bone className="h-4 w-40" />
-          <Bone className="h-3 w-52" />
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-3 gap-4">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="space-y-1.5">
-                <Bone className="h-3 w-20" />
-                <Bone className="h-8 w-10" />
-                <Bone className="h-3 w-16" />
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Side-by-side pairs */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <ChartCardSkeleton />
-        <ChartCardSkeleton />
+      {/* Communication section */}
+      <div className="space-y-5">
+        <Bone className="h-4 w-32" />
+        <ChartCard />
       </div>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <ChartCardSkeleton />
-        <ChartCardSkeleton />
+      {/* Commitments section */}
+      <div className="space-y-5">
+        <Bone className="h-4 w-32" />
+        <Bone className="h-8 w-52 rounded-lg" />
+        <ChartCard tall />
+        <div className="grid gap-5 lg:grid-cols-2">
+          <ChartCard />
+          <ChartCard />
+        </div>
       </div>
     </div>
   );
