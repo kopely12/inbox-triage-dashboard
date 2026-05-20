@@ -1,9 +1,10 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { useSession, signOut } from 'next-auth/react';
-import { cn } from '@/lib/utils';
+import { useEffect, useState }     from 'react';
+import Link                        from 'next/link';
+import { usePathname }             from 'next/navigation';
+import { useSession, signOut }     from 'next-auth/react';
+import { cn }                      from '@/lib/utils';
 import {
   CreditCard,
   Users,
@@ -17,28 +18,71 @@ import {
   SlidersHorizontal,
   Settings2,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { Badge }  from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
-const NAV_ITEMS = [
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface SubItem {
+  href:  string; // hash anchor, e.g. '#gmail'
+  label: string;
+}
+
+interface NavItem {
+  href:      string;
+  label:     string;
+  icon:      React.ComponentType<{ className?: string }>;
+  adminOnly: boolean;
+  subItems?: SubItem[];
+}
+
+// ── Nav config ────────────────────────────────────────────────────────────────
+
+const NAV_ITEMS: NavItem[] = [
   { href: '/',            label: 'Overview',    icon: LayoutDashboard,   adminOnly: false },
   { href: '/analytics',   label: 'Analytics',   icon: BarChart2,         adminOnly: false },
   { href: '/commitments', label: 'Commitments', icon: CheckSquare,       adminOnly: false },
   { href: '/senders',     label: 'Senders',     icon: SlidersHorizontal, adminOnly: false },
-  { href: '/preferences', label: 'Preferences', icon: Settings2,         adminOnly: false },
-  { href: '/billing',     label: 'Billing',     icon: CreditCard,        adminOnly: false },
-  { href: '/team',        label: 'Team',        icon: Users,             adminOnly: true  },
+  {
+    href: '/preferences', label: 'Preferences', icon: Settings2, adminOnly: false,
+    subItems: [
+      { href: '#gmail',     label: 'Gmail connection' },
+      { href: '#extension', label: 'Extension'        },
+      { href: '#time',      label: 'Time & reminders' },
+      { href: '#account',   label: 'Account'          },
+    ],
+  },
+  { href: '/billing', label: 'Billing', icon: CreditCard, adminOnly: false },
+  { href: '/team',    label: 'Team',    icon: Users,       adminOnly: true  },
 ];
 
+// ── useHash hook ──────────────────────────────────────────────────────────────
+
+function useHash(): string {
+  const [hash, setHash] = useState('');
+
+  useEffect(() => {
+    setHash(window.location.hash);
+    const onHashChange = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  return hash;
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
+
 export function Sidebar() {
-  const pathname  = usePathname();
-  const { data: session } = useSession();
+  const pathname             = usePathname();
+  const { data: session }    = useSession();
+  const hash                 = useHash();
 
   const isAdmin      = session?.user?.orgRole === 'admin' || session?.user?.orgRole === 'owner';
   const isSuperAdmin = session?.user?.isSuperAdmin === true;
-  const name    = session?.user?.name ?? session?.user?.email ?? '—';
-  const initials = name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
-  const plan    = session?.user?.planTier ?? 'free';
+  const name         = session?.user?.name ?? session?.user?.email ?? '—';
+  const initials     = name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+  const plan         = session?.user?.planTier ?? 'free';
 
   return (
     <aside className="flex flex-col w-60 shrink-0 border-r border-border bg-card h-full">
@@ -52,28 +96,54 @@ export function Sidebar() {
 
       {/* Nav */}
       <nav className="flex flex-col gap-0.5 p-3 flex-1">
-        {NAV_ITEMS.map(({ href, label, icon: Icon, adminOnly }) => {
+        {NAV_ITEMS.map(({ href, label, icon: Icon, adminOnly, subItems }) => {
           if (adminOnly && !isAdmin) return null;
+
           const active = pathname === href || pathname.startsWith(href + '/');
+
           return (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
-                active
-                  ? 'bg-primary/10 text-primary font-medium'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+            <div key={href}>
+              <Link
+                href={href}
+                className={cn(
+                  'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+                  active
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                )}
+              >
+                <Icon className="w-4 h-4 shrink-0" />
+                {label}
+                {active && <ChevronRight className="w-3 h-3 ml-auto opacity-40" />}
+              </Link>
+
+              {/* Submenu — visible when parent is active */}
+              {active && subItems && (
+                <div className="mt-0.5 ml-3 flex flex-col gap-0.5 border-l border-border pl-3">
+                  {subItems.map(({ href: subHref, label: subLabel }) => {
+                    const subActive = hash === subHref;
+                    return (
+                      <a
+                        key={subHref}
+                        href={subHref}
+                        className={cn(
+                          'flex items-center px-2 py-1.5 rounded-md text-xs transition-colors',
+                          subActive
+                            ? 'text-primary font-medium bg-primary/5'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                        )}
+                      >
+                        {subLabel}
+                      </a>
+                    );
+                  })}
+                </div>
               )}
-            >
-              <Icon className="w-4 h-4 shrink-0" />
-              {label}
-              {active && <ChevronRight className="w-3 h-3 ml-auto opacity-40" />}
-            </Link>
+            </div>
           );
         })}
 
-        {/* Super-admin link — only visible to mark@kopely.com */}
+        {/* Super-admin link — only visible to super-admins */}
         {isSuperAdmin && (
           <>
             <div className="my-1 border-t border-border" />
@@ -83,7 +153,7 @@ export function Sidebar() {
                 'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
                 pathname === '/admin'
                   ? 'bg-primary/10 text-primary font-medium'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
               )}
             >
               <Shield className="w-4 h-4 shrink-0" />

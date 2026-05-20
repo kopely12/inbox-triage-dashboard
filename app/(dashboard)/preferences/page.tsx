@@ -58,13 +58,17 @@ export default async function PreferencesPage() {
       </div>
 
       {/* Gmail connection */}
-      <GmailConnectionCard email={gmailEmail} name={gmailName} />
+      <div id="gmail" className="scroll-mt-4">
+        <GmailConnectionCard email={gmailEmail} name={gmailName} />
+      </div>
 
       {/* Extension scan preferences */}
-      <ExtensionPrefsForm initialPrefs={extensionPrefs} />
+      <div id="extension" className="scroll-mt-4">
+        <ExtensionPrefsForm initialPrefs={extensionPrefs} />
+      </div>
 
       {/* Timezone & snooze */}
-      <Card>
+      <Card id="time" className="scroll-mt-4">
         <CardHeader className="pb-4">
           <CardTitle className="text-sm font-medium">Time &amp; reminders</CardTitle>
           <CardDescription>Controls how the extension schedules reminders and pre-fills snooze times.</CardDescription>
@@ -75,7 +79,7 @@ export default async function PreferencesPage() {
       </Card>
 
       {/* Danger zone */}
-      <Card className="border-destructive/40">
+      <Card id="account" className="scroll-mt-4 border-destructive/40">
         <CardHeader className="pb-4">
           <CardTitle className="text-sm font-medium text-destructive">Danger zone</CardTitle>
           <CardDescription>Irreversible actions — please proceed carefully.</CardDescription>
