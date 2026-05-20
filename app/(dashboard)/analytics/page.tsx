@@ -448,7 +448,7 @@ export default async function AnalyticsPage({
   });
 
   return (
-    <div className="max-w-4xl space-y-8">
+    <div className="max-w-7xl space-y-8">
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">

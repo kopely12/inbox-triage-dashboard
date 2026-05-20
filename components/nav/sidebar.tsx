@@ -5,7 +5,6 @@ import { usePathname } from 'next/navigation';
 import { useSession, signOut } from 'next-auth/react';
 import { cn } from '@/lib/utils';
 import {
-  User,
   CreditCard,
   Users,
   Mail,
@@ -23,12 +22,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 const NAV_ITEMS = [
   { href: '/',            label: 'Overview',    icon: LayoutDashboard,   adminOnly: false },
-  { href: '/account',     label: 'Account',     icon: User,              adminOnly: false },
   { href: '/analytics',   label: 'Analytics',   icon: BarChart2,         adminOnly: false },
   { href: '/commitments', label: 'Commitments', icon: CheckSquare,       adminOnly: false },
-  { href: '/senders',      label: 'Senders',      icon: SlidersHorizontal, adminOnly: false },
-  { href: '/preferences',  label: 'Preferences',  icon: Settings2,         adminOnly: false },
-  { href: '/billing',      label: 'Billing',      icon: CreditCard,        adminOnly: false },
+  { href: '/senders',     label: 'Senders',     icon: SlidersHorizontal, adminOnly: false },
+  { href: '/preferences', label: 'Preferences', icon: Settings2,         adminOnly: false },
+  { href: '/billing',     label: 'Billing',     icon: CreditCard,        adminOnly: false },
   { href: '/team',        label: 'Team',        icon: Users,             adminOnly: true  },
 ];
 

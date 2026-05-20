@@ -35,7 +35,7 @@ function ActivityRow() {
 
 export default function OverviewLoading() {
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="max-w-7xl space-y-6">
       {/* Greeting */}
       <div className="space-y-1.5">
         <Bone className="h-6 w-32" />

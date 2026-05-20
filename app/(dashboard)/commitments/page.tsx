@@ -15,7 +15,7 @@ import { ExternalLink, Download, ArrowUpRight, Lock } from 'lucide-react';
 // ─── types ────────────────────────────────────────────────────────────────────
 
 type StatusFilter    = 'all' | 'open' | 'overdue' | 'done';
-type DirectionFilter = 'all' | 'outgoing' | 'incoming';
+type DirectionFilter = 'all' | 'outgoing' | 'assigned';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -47,7 +47,7 @@ export default async function CommitmentsPage({
 
   const validStatus    = (['all', 'open', 'overdue', 'done'] as StatusFilter[]).includes(status as StatusFilter)
     ? (status as StatusFilter) : 'open';
-  const validDirection = (['all', 'outgoing', 'incoming'] as DirectionFilter[]).includes(direction as DirectionFilter)
+  const validDirection = (['all', 'outgoing', 'assigned'] as DirectionFilter[]).includes(direction as DirectionFilter)
     ? (direction as DirectionFilter) : 'all';
 
   const PAGE_SIZE = 50;
@@ -115,7 +115,7 @@ export default async function CommitmentsPage({
   ];
 
   return (
-    <div className="max-w-4xl space-y-6">
+    <div className="max-w-7xl space-y-6">
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -158,7 +158,7 @@ export default async function CommitmentsPage({
 
         {/* Direction filter */}
         <div className="flex items-center gap-1 text-sm">
-          {(['all', 'outgoing', 'incoming'] as const).map((d) => (
+          {(['all', 'outgoing', 'assigned'] as const).map((d) => (
             <Link key={d} href={dirHref(d)}
               className={[
                 'px-2.5 py-1 rounded-md text-sm transition-colors capitalize',

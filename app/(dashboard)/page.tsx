@@ -95,15 +95,17 @@ export default async function OverviewPage() {
       .limit(1)
       .maybeSingle(),
 
-    // Total open commitments
+    // Total open commitments (outgoing + assigned only; incoming/cold now in waiting_items)
     supabaseAdmin.from('commitments')
       .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId).eq('status', 'open'),
+      .eq('user_id', userId).eq('status', 'open')
+      .in('direction', ['outgoing', 'assigned']),
 
     // Overdue
     supabaseAdmin.from('commitments')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', userId).eq('status', 'open')
+      .in('direction', ['outgoing', 'assigned'])
       .or(`due_date.lt.${todayISO},scanned_at.lte.${overdueThreshold.toISOString()}`),
 
     // Due this week (has an explicit due_date between today and Sunday)
@@ -119,10 +121,11 @@ export default async function OverviewPage() {
       .eq('user_id', userId).eq('status', 'done')
       .gte('resolved_at', sevenAgoISO),
 
-    // Urgent item list: overdue + due this week, up to 6
+    // Urgent item list: overdue + due this week, up to 6 (outgoing + assigned only)
     supabaseAdmin.from('commitments')
       .select('id, direction, description, counterparty, counterparty_email, due_date, thread_id, scanned_at, status')
       .eq('user_id', userId).eq('status', 'open')
+      .in('direction', ['outgoing', 'assigned'])
       .or(`due_date.lte.${endOfWeekISO},scanned_at.lte.${overdueThreshold.toISOString()}`)
       .order('due_date', { ascending: true, nullsFirst: false })
       .order('scanned_at', { ascending: true })
@@ -165,7 +168,7 @@ export default async function OverviewPage() {
                           (resolvedThisWeekCount ?? 0) > 0 || (waitingCount ?? 0) > 0;
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="max-w-7xl space-y-6">
 
       {/* Greeting */}
       <div>

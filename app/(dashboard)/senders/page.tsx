@@ -163,7 +163,7 @@ export default async function SendersPage() {
   const suppressedCount = (rulesRaw ?? []).filter((r) => r.rule_value === 'never').length;
 
   return (
-    <div className="max-w-5xl space-y-6">
+    <div className="max-w-7xl space-y-6">
 
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between">

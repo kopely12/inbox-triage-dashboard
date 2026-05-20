@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
 
   const direction = req.nextUrl.searchParams.get('direction') ?? 'all';
   const status    = req.nextUrl.searchParams.get('status')    ?? 'all';
-  const validDir  = ['outgoing', 'incoming'].includes(direction) ? direction : null;
+  const validDir  = ['outgoing', 'assigned'].includes(direction) ? direction : null;
   const validStatus = (['open', 'done', 'overdue', 'all'] as const).includes(status as 'open' | 'done' | 'overdue' | 'all')
     ? status as 'open' | 'done' | 'overdue' | 'all'
     : 'all';
