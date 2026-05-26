@@ -215,3 +215,21 @@ export async function revokeInvite(inviteId: string) {
   revalidatePath('/team');
   return { success: true };
 }
+
+export async function resendInvite(inviteId: string) {
+  const { error: authErr } = await requireAdmin();
+  if (authErr) return { error: authErr };
+  if (!inviteId || typeof inviteId !== 'string') return { error: 'Invalid invite ID.' };
+
+  const { error } = await supabaseAdmin
+    .from('org_invites')
+    .update({
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+    .eq('id', inviteId)
+    .is('accepted_at', null); // only renew pending invites
+
+  if (error) return { error: 'Failed to resend invite.' };
+  revalidatePath('/team');
+  return { success: true };
+}

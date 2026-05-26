@@ -1,6 +1,7 @@
 'use client';
 
-import { cn } from '@/lib/utils';
+import { cn }   from '@/lib/utils';
+import { Info } from 'lucide-react';
 
 export type ActionBreakdown = {
   replied:   number;
@@ -41,6 +42,18 @@ export function ActionRateChart({ data }: { data: ActionBreakdown }) {
     );
   }
 
+  // Low-confidence: fewer than 5 interactions recorded
+  if (total < 5) {
+    return (
+      <div className="flex flex-col items-center justify-center h-36 gap-2 text-center px-6">
+        <p className="text-sm font-medium text-foreground">Not enough data yet</p>
+        <p className="text-xs text-muted-foreground max-w-xs">
+          Needs at least 5 triage interactions to show a meaningful breakdown. {total} recorded so far.
+        </p>
+      </div>
+    );
+  }
+
   const pct = (n: number) => Math.round((n / total) * 100);
 
   const allBars: Bar[] = [
@@ -57,6 +70,14 @@ export function ActionRateChart({ data }: { data: ActionBreakdown }) {
 
   return (
     <div className="space-y-3">
+      {/* Capture-scope disclaimer — prominent at top */}
+      <div className="flex items-start gap-1.5 rounded-md bg-muted/50 px-2.5 py-2">
+        <Info className="w-3 h-3 text-muted-foreground shrink-0 mt-0.5" />
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
+          Actions recorded in the extension sidebar only — direct Gmail replies aren&apos;t captured.
+        </p>
+      </div>
+
       {/* Stacked bar */}
       <div className="flex h-4 rounded-full overflow-hidden gap-0.5">
         {bars.map((b) => (
@@ -83,9 +104,6 @@ export function ActionRateChart({ data }: { data: ActionBreakdown }) {
       {/* Signal quality line */}
       <p className={cn('text-xs font-medium pt-1 border-t border-border', signal.cls)}>
         {signal.text} — {replyRate}% reply rate across {total} surfaced emails
-      </p>
-      <p className="text-xs text-muted-foreground pt-1 border-t border-border mt-1">
-        Recorded in the extension sidebar only — direct Gmail replies aren't captured.
       </p>
     </div>
   );

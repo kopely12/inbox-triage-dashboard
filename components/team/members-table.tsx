@@ -1,7 +1,7 @@
 'use client';
 
 import { useTransition, useState } from 'react';
-import { changeRole, removeMember, revokeInvite, transferOwnership } from '@/app/actions/team';
+import { changeRole, removeMember, revokeInvite, transferOwnership, resendInvite } from '@/app/actions/team';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,7 @@ import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { Crown, Loader2, Copy, Check, X, Search } from 'lucide-react';
+import { Crown, Loader2, Copy, Check, X, Search, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -95,8 +95,9 @@ function MemberRow({ member, currentUserId, isAdmin, viewerIsOwner }: {
   isAdmin: boolean;
   viewerIsOwner: boolean;
 }) {
-  const [pending, startTransition] = useTransition();
+  const [pending,     startTransition] = useTransition();
   const [transferOpen, setTransferOpen] = useState(false);
+  const [removeOpen,   setRemoveOpen]   = useState(false);
 
   const isSelf        = member.user_id === currentUserId;
   const memberIsOwner = member.role === 'owner';
@@ -164,7 +165,7 @@ function MemberRow({ member, currentUserId, isAdmin, viewerIsOwner }: {
             className="w-7 h-7 shrink-0 text-muted-foreground hover:text-destructive"
             disabled={pending}
             title={`Remove ${name}`}
-            onClick={() => startTransition(() => { removeMember(member.id); })}
+            onClick={() => setRemoveOpen(true)}
           >
             {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
           </Button>
@@ -177,6 +178,39 @@ function MemberRow({ member, currentUserId, isAdmin, viewerIsOwner }: {
         memberId={member.id}
         onClose={() => setTransferOpen(false)}
       />
+
+      {/* Remove confirmation dialog */}
+      <Dialog open={removeOpen} onOpenChange={(v) => { if (!v) setRemoveOpen(false); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Remove {name}?</DialogTitle>
+            <DialogDescription>
+              This will remove <strong>{name}</strong> ({email}) from your organization.
+              Their commitments and data will be retained. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setRemoveOpen(false)} disabled={pending}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={pending}
+              onClick={() => {
+                setRemoveOpen(false);
+                startTransition(async () => {
+                  const result = await removeMember(member.id);
+                  if (result?.error) toast.error(result.error);
+                  else toast.success(`${name} removed from your organization`);
+                });
+              }}
+            >
+              {pending ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : null}
+              Remove member
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -184,8 +218,9 @@ function MemberRow({ member, currentUserId, isAdmin, viewerIsOwner }: {
 // ── Invite row ────────────────────────────────────────────────────────────────
 
 function InviteRow({ invite, baseUrl }: { invite: Invite; baseUrl: string }) {
-  const [pending, startTransition] = useTransition();
-  const [copied, setCopied] = useState(false);
+  const [pending,        startTransition]  = useTransition();
+  const [resendPending,  startResendTrans] = useTransition();
+  const [copied,         setCopied]        = useState(false);
   const inviteUrl = `${baseUrl}/invite/${invite.token}`;
 
   const expiresAt   = new Date(invite.expires_at);
@@ -228,6 +263,26 @@ function InviteRow({ invite, baseUrl }: { invite: Invite; baseUrl: string }) {
         {copied
           ? <Check className="w-3.5 h-3.5 text-green-600" />
           : <Copy className="w-3.5 h-3.5" />}
+      </Button>
+
+      {/* Resend — extends expiry by 7 days */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="w-7 h-7 shrink-0 text-muted-foreground hover:text-foreground"
+        disabled={resendPending}
+        title="Resend invite — extends expiry by 7 days"
+        onClick={() =>
+          startResendTrans(async () => {
+            const result = await resendInvite(invite.id);
+            if (result?.error) toast.error(result.error);
+            else toast.success(`Invite resent to ${invite.email}`);
+          })
+        }
+      >
+        {resendPending
+          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          : <RefreshCw className="w-3.5 h-3.5" />}
       </Button>
 
       <Button

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import Link from 'next/link';
+import Link             from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,8 +10,8 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
-import { Search, Plus, ArrowUpDown, CheckCheck, X, Loader2, Check, Download } from 'lucide-react';
-import { bulkMarkDone, bulkDismiss } from '@/app/actions/commitments';
+import { Search, Plus, ArrowUpDown, CheckCheck, X, Loader2, Check, Download, Clock } from 'lucide-react';
+import { bulkMarkDone, bulkDismiss, bulkSnooze } from '@/app/actions/commitments';
 import { CommitmentRow }        from './commitment-row';
 import { CommitmentDetailDialog } from './commitment-detail-dialog';
 import { CreateCommitmentDialog } from './create-commitment-dialog';
@@ -63,13 +64,16 @@ export function CommitmentsClient({
   commitments, queryError, counts, totalCount, pageNum, totalPages,
   validStatus, validDirection, validSort, todayStr,
 }: Props) {
-  const [query,               setQuery]              = useState('');
+  const searchParams = useSearchParams();
+  const [query,               setQuery]              = useState(() => searchParams.get('q') ?? '');
   const [selected,            setSelected]           = useState<Set<string>>(new Set());
   const [optimisticDone,      setOptimisticDone]     = useState<Set<string>>(new Set());
   const [optimisticDismissed, setOptimisticDismissed] = useState<Set<string>>(new Set());
   const [detailItem,          setDetailItem]         = useState<Commitment | null>(null);
   const [showCreate,          setShowCreate]         = useState(false);
+  const [showSnooze,          setShowSnooze]         = useState(false);
   const [bulkPending,         startBulkTransition]   = useTransition();
+  const [snoozePending,       startSnoozeTransition] = useTransition();
 
   // ── URL builder ───────────────────────────────────────────────────────────────
   function buildUrl(overrides: Partial<Record<'status' | 'direction' | 'sort' | 'page', string>>) {
@@ -170,6 +174,25 @@ export function CommitmentsClient({
         toast.error(result.error);
       } else {
         toast.success(`Dismissed ${snapshot.length}`);
+      }
+    });
+  }
+
+  function handleBulkSnooze(dateVal: string) {
+    if (selectedIds.length === 0 || !dateVal) return;
+    const snapshot = [...selectedIds];
+    setSelected(new Set());
+    setShowSnooze(false);
+
+    startSnoozeTransition(async () => {
+      const result = await bulkSnooze(snapshot, dateVal);
+      if (result?.error) {
+        toast.error(result.error);
+      } else {
+        const label = new Date(dateVal + 'T00:00:00').toLocaleDateString('en-US', {
+          weekday: 'short', month: 'short', day: 'numeric',
+        });
+        toast.success(`Snoozed ${snapshot.length} until ${label}`);
       }
     });
   }
@@ -302,7 +325,7 @@ export function CommitmentsClient({
         </div>
 
         {selectedIds.length > 0 && (
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
             <span className="text-xs text-muted-foreground whitespace-nowrap">
               {selectedIds.length} selected
             </span>
@@ -312,12 +335,26 @@ export function CommitmentsClient({
                 variant="outline"
                 className="gap-1 h-8"
                 onClick={handleBulkDone}
-                disabled={bulkPending}
+                disabled={bulkPending || snoozePending}
               >
                 {bulkPending
                   ? <Loader2 className="w-3 h-3 animate-spin" />
                   : <CheckCheck className="w-3 h-3" />}
                 Mark done
+              </Button>
+            )}
+            {(validStatus === 'open' || validStatus === 'overdue') && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1 h-8 text-muted-foreground"
+                onClick={() => setShowSnooze((v) => !v)}
+                disabled={bulkPending || snoozePending}
+              >
+                {snoozePending
+                  ? <Loader2 className="w-3 h-3 animate-spin" />
+                  : <Clock className="w-3 h-3" />}
+                Snooze
               </Button>
             )}
             {validStatus !== 'dismissed' && (
@@ -326,7 +363,7 @@ export function CommitmentsClient({
                 variant="outline"
                 className="gap-1 h-8 text-muted-foreground"
                 onClick={handleBulkDismiss}
-                disabled={bulkPending}
+                disabled={bulkPending || snoozePending}
               >
                 {bulkPending
                   ? <Loader2 className="w-3 h-3 animate-spin" />
@@ -337,6 +374,30 @@ export function CommitmentsClient({
           </div>
         )}
       </div>
+
+      {/* Inline snooze picker */}
+      {showSnooze && selectedIds.length > 0 && (
+        <div className="flex items-center gap-3 px-3 py-2 rounded-md border border-border bg-muted/50 text-sm">
+          <Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+          <span className="text-xs text-muted-foreground whitespace-nowrap">
+            Snooze {selectedIds.length} until:
+          </span>
+          <input
+            type="date"
+            min={new Date().toISOString().slice(0, 10)}
+            className="h-7 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+            onChange={(e) => {
+              if (e.target.value) handleBulkSnooze(e.target.value);
+            }}
+          />
+          <button
+            onClick={() => setShowSnooze(false)}
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       {/* Table */}
       <Card>

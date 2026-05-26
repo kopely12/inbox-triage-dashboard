@@ -227,3 +227,24 @@ export async function bulkDismiss(ids: string[]) {
   bust();
   return { success: true };
 }
+
+// ── Bulk snooze (defer due date) ──────────────────────────────────────────────
+
+export async function bulkSnooze(ids: string[], dueDate: string) {
+  const { error, userId } = await requireUser();
+  if (error) return { error };
+  if (!Array.isArray(ids) || ids.length === 0) return { error: 'No commitments selected.' };
+  if (ids.length > 100) return { error: 'Too many selected (max 100 at once).' };
+  if (!ids.every((id) => typeof id === 'string' && id.length > 0)) return { error: 'Invalid selection.' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return { error: 'Invalid date format.' };
+
+  const { error: dbError } = await supabaseAdmin
+    .from('commitments')
+    .update({ due_date: dueDate })
+    .in('id', ids)
+    .eq('user_id', userId);
+
+  if (dbError) return { error: 'Failed to snooze.' };
+  bust();
+  return { success: true };
+}

@@ -18,7 +18,9 @@ import { ActionRateChart,          type ActionBreakdown }         from '@/compon
 import { ChartErrorBoundary }                                      from '@/components/analytics/chart-error-boundary';
 import type { CommitmentPoint }                                    from '@/components/analytics/commitment-chart';
 
-import { Inbox, Mail, CheckSquare, TrendingUp } from 'lucide-react';
+import { Inbox, Mail, CheckSquare, TrendingUp, Download } from 'lucide-react';
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
 
 export const metadata = { title: 'Analytics — Inbox Triage' };
 
@@ -532,14 +534,22 @@ export default async function AnalyticsPage({
     <div className="max-w-4xl space-y-8">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-lg font-semibold">Analytics</h2>
           <p className="text-sm text-muted-foreground">
             {rangeLabel} — triage, communication, and commitment data.
           </p>
         </div>
-        <RangeToggle current={validRange} />
+        <div className="flex items-center gap-2 shrink-0">
+          <Button asChild variant="ghost" size="sm" className="gap-1.5 text-muted-foreground">
+            <Link href={`/api/analytics/export?range=${validRange}`}>
+              <Download className="w-3.5 h-3.5" />
+              Export CSV
+            </Link>
+          </Button>
+          <RangeToggle current={validRange} />
+        </div>
       </div>
 
       {/* Insights strip */}

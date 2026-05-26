@@ -1,15 +1,30 @@
 'use client';
 
 import { useState, useMemo, useTransition } from 'react';
-import { cn }     from '@/lib/utils';
-import { toast }  from 'sonner';
+import Link        from 'next/link';
+import { cn }      from '@/lib/utils';
+import { toast }   from 'sonner';
 import {
   Pin, EyeOff, X, ArrowUpDown, ArrowUp, ArrowDown, Search,
+  Bot, ListChecks, Info,
 } from 'lucide-react';
-import { Badge }  from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input }  from '@/components/ui/input';
+import { Badge }   from '@/components/ui/badge';
+import { Button }  from '@/components/ui/button';
+import { Input }   from '@/components/ui/input';
 import { pinSender, suppressSender, clearSenderRule } from '@/app/actions/senders';
+
+// ─── automated sender detection ───────────────────────────────────────────────
+
+const AUTO_PATTERNS = [
+  'noreply', 'no-reply', 'donotreply', 'do-not-reply',
+  'notifications', 'newsletter', 'mailer-daemon', 'postmaster',
+  'bounce', 'alert', 'automated', 'robot', 'noreply+',
+];
+
+function isAutomatedSender(email: string): boolean {
+  const local = email.split('@')[0].toLowerCase();
+  return AUTO_PATTERNS.some((p) => local.includes(p));
+}
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -173,9 +188,11 @@ export function SendersTable({ rows }: { rows: FullSenderRow[] }) {
   const [sortKey,    setSortKey]    = useState<SortKey>('health');
   const [sortDir,    setSortDir]    = useState<SortDir>('asc');
   const [filterKey,  setFilterKey]  = useState<FilterKey>('all');
+  const [selected,   setSelected]   = useState<Set<string>>(new Set());
   // Optimistic rule state: email → new rule (overrides server data while pending)
   const [localRules, setLocalRules] = useState<Map<string, 'always' | 'never' | null>>(new Map());
   const [, startTransition]         = useTransition();
+  const [, startBulkTransition]     = useTransition();
 
   // Effective rule for a row (local override wins)
   function effectiveRule(row: FullSenderRow): 'always' | 'never' | null {
@@ -230,6 +247,42 @@ export function SendersTable({ rows }: { rows: FullSenderRow[] }) {
       } else {
         toast.success('Rule removed — sender will be scored normally');
         clearLocalRule(email);
+      }
+    });
+  }
+
+  // ── Bulk actions ────────────────────────────────────────────────────────────
+
+  function handleBulkSuppress() {
+    const emails = [...selected];
+    emails.forEach((e) => setLocalRule(e, 'never'));
+    setSelected(new Set());
+    startBulkTransition(async () => {
+      const results = await Promise.all(emails.map((e) => suppressSender(e)));
+      const failed  = results.filter((r) => r.error).length;
+      if (failed > 0) {
+        toast.error(`Failed to suppress ${failed} sender${failed !== 1 ? 's' : ''}`);
+        emails.forEach((e) => clearLocalRule(e));
+      } else {
+        toast.success(`Suppressed ${emails.length} sender${emails.length !== 1 ? 's' : ''}`);
+        emails.forEach((e) => clearLocalRule(e));
+      }
+    });
+  }
+
+  function handleBulkClearRules() {
+    const emails = [...selected];
+    emails.forEach((e) => setLocalRule(e, null));
+    setSelected(new Set());
+    startBulkTransition(async () => {
+      const results = await Promise.all(emails.map((e) => clearSenderRule(e)));
+      const failed  = results.filter((r) => r.error).length;
+      if (failed > 0) {
+        toast.error(`Failed to clear ${failed} rule${failed !== 1 ? 's' : ''}`);
+        emails.forEach((e) => clearLocalRule(e));
+      } else {
+        toast.success(`Cleared rules for ${emails.length} sender${emails.length !== 1 ? 's' : ''}`);
+        emails.forEach((e) => clearLocalRule(e));
       }
     });
   }
@@ -309,12 +362,63 @@ export function SendersTable({ rows }: { rows: FullSenderRow[] }) {
         <FilterChips active={filterKey} counts={chipCounts} onChange={setFilterKey} />
       </div>
 
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/60 border border-border">
+          <span className="text-xs text-muted-foreground">
+            {selected.size} selected
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 text-xs"
+            onClick={handleBulkSuppress}
+          >
+            <EyeOff className="w-3 h-3" /> Suppress all
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 gap-1 text-xs text-muted-foreground"
+            onClick={handleBulkClearRules}
+          >
+            <X className="w-3 h-3" /> Clear rules
+          </Button>
+          <button
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setSelected(new Set())}
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <div className="overflow-x-auto rounded-md border border-border">
         <table className="w-full text-sm">
           <thead className="bg-muted/40">
             <tr className="text-xs text-muted-foreground border-b border-border">
-              <SortTh label="Sender"              sortKey="name"     current={sortKey} dir={sortDir} onClick={toggleSort} className="pl-3 text-left" />
+              {/* Select-all checkbox */}
+              <th className="pb-2 w-8 pl-3">
+                <input
+                  type="checkbox"
+                  className="w-3.5 h-3.5 rounded cursor-pointer accent-primary"
+                  checked={selected.size === sorted.length && sorted.length > 0}
+                  onChange={() => {
+                    if (selected.size === sorted.length) setSelected(new Set());
+                    else setSelected(new Set(sorted.map((r) => r.email)));
+                  }}
+                />
+              </th>
+              <SortTh label="Sender"              sortKey="name"     current={sortKey} dir={sortDir} onClick={toggleSort} className="pl-1 text-left" />
+              <th className="pb-2 font-medium text-left pl-0 pr-1 w-5">
+                <span
+                  title="Health: Red = has overdue commitments · Yellow = high open backlog (5+ or >50%) · Green = on track"
+                  className="cursor-help inline-flex"
+                >
+                  <Info className="w-3 h-3 text-muted-foreground/50" />
+                </span>
+              </th>
               <SortTh label="Score"               sortKey="score"    current={sortKey} dir={sortDir} onClick={toggleSort} className="text-left w-36 px-3" />
               <th    className="pb-2 font-medium text-left px-3 w-32">Replied / Dismissed</th>
               <SortTh label="Open"                sortKey="open"     current={sortKey} dir={sortDir} onClick={toggleSort} className="text-right w-14 pr-2" />
@@ -336,14 +440,31 @@ export function SendersTable({ rows }: { rows: FullSenderRow[] }) {
                 const rule     = effectiveRule(row);
                 const gmailUrl = `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(`from:${row.email}`)}`;
                 const totalInteractions = row.replyCount + row.dismissCount;
+                const isAuto   = isAutomatedSender(row.email);
 
                 return (
                   <tr
                     key={row.email}
                     className="border-b last:border-0 hover:bg-muted/20 transition-colors group"
                   >
+                    {/* Row checkbox */}
+                    <td className="py-2.5 pl-3 pr-1 w-8">
+                      <input
+                        type="checkbox"
+                        className="w-3.5 h-3.5 rounded cursor-pointer accent-primary"
+                        checked={selected.has(row.email)}
+                        onChange={(e) => {
+                          setSelected((prev) => {
+                            const n = new Set(prev);
+                            e.target.checked ? n.add(row.email) : n.delete(row.email);
+                            return n;
+                          });
+                        }}
+                      />
+                    </td>
+
                     {/* Sender identity */}
-                    <td className="py-2.5 pl-3 pr-2 max-w-[180px]">
+                    <td className="py-2.5 pl-1 pr-2 max-w-[180px]">
                       <div className="flex items-center gap-2 min-w-0">
                         <span
                           className={cn('w-2 h-2 rounded-full shrink-0', HEALTH_DOT_CLS[row.health])}
@@ -360,6 +481,11 @@ export function SendersTable({ rows }: { rows: FullSenderRow[] }) {
                             >
                               {row.name || row.email}
                             </a>
+                            {isAuto && (
+                              <Badge variant="outline" className="text-[10px] py-0 h-4 gap-0.5 shrink-0 text-muted-foreground">
+                                <Bot className="w-2.5 h-2.5" /> Auto
+                              </Badge>
+                            )}
                             {rule === 'always' && (
                               <Badge variant="default" className="text-[10px] py-0 h-4 gap-0.5 shrink-0">
                                 <Pin className="w-2.5 h-2.5" /> Pinned
@@ -377,6 +503,9 @@ export function SendersTable({ rows }: { rows: FullSenderRow[] }) {
                         </div>
                       </div>
                     </td>
+
+                    {/* Health info placeholder cell (to align with header) */}
+                    <td className="py-2.5" />
 
                     {/* Score */}
                     <td className="py-2.5 px-3">
@@ -427,6 +556,19 @@ export function SendersTable({ rows }: { rows: FullSenderRow[] }) {
                     {/* Actions — hover only */}
                     <td className="py-2.5 pr-3 text-right">
                       <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {/* Drill-through: filter commitments by this sender */}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          asChild
+                          className="h-6 px-2 text-xs gap-1 text-muted-foreground"
+                          title="View commitments for this sender"
+                        >
+                          <Link href={`/commitments?q=${encodeURIComponent(row.email)}`}>
+                            <ListChecks className="w-3 h-3" /> History
+                          </Link>
+                        </Button>
+
                         {rule ? (
                           <Button
                             variant="ghost"

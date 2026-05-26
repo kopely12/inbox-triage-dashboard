@@ -267,7 +267,11 @@ export default async function BillingPage() {
             {invoices.length > 0 && (
               <div>
                 <dt className="text-xs text-muted-foreground">Invoices</dt>
-                <dd className="mt-0.5 font-medium">{invoices.length} on file</dd>
+                <dd className="mt-0.5 font-medium">
+                  <a href="#billing-history" className="hover:underline">
+                    {invoices.length} on file
+                  </a>
+                </dd>
               </div>
             )}
           </dl>
@@ -332,7 +336,7 @@ export default async function BillingPage() {
       )}
 
       {/* ── Billing history ──────────────────────────────────────────────────────── */}
-      <Card>
+      <Card id="billing-history" className="scroll-mt-4">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium flex items-center gap-2">
             <Receipt className="w-4 h-4 text-muted-foreground" />
@@ -353,21 +357,21 @@ export default async function BillingPage() {
             </TableHeader>
             <TableBody>
               {invoices.length > 0 ? (
-                invoices.map((inv) => (
-                  <TableRow key={inv.id}>
-                    <TableCell className="pl-6 text-sm whitespace-nowrap">
+                invoices.map((inv, i) => (
+                  <TableRow key={inv.id} className={i % 2 !== 0 ? 'bg-muted/30' : ''}>
+                    <TableCell className="pl-6 py-3.5 text-sm whitespace-nowrap">
                       {fmtDateUnix(inv.date)}
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">
+                    <TableCell className="py-3.5 text-sm text-muted-foreground max-w-[240px] truncate">
                       {inv.description}
                     </TableCell>
-                    <TableCell className="text-sm font-medium whitespace-nowrap">
+                    <TableCell className="py-3.5 text-sm font-medium whitespace-nowrap">
                       {fmtAmount(inv.amount, inv.currency)}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="py-3.5">
                       <InvoiceStatusBadge status={inv.status} />
                     </TableCell>
-                    <TableCell className="pr-6 text-right">
+                    <TableCell className="pr-6 py-3.5 text-right">
                       {(inv.pdfUrl || inv.hostedUrl) ? (
                         <div className="flex items-center justify-end gap-2">
                           {inv.pdfUrl && (

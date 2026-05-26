@@ -1,6 +1,63 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+
+// ── Natural-language date parser ───────────────────────────────────────────────
+
+function parseNaturalDate(input: string): string | null {
+  const s = input.toLowerCase().trim();
+  if (!s) return null;
+
+  // Direct ISO date
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+  if (s === 'today')       return fmt(today);
+  if (s === 'tomorrow')    { const d = new Date(today); d.setDate(d.getDate() + 1); return fmt(d); }
+  if (s === 'next week')   { const d = new Date(today); d.setDate(d.getDate() + 7); return fmt(d); }
+  if (s === 'next month')  { const d = new Date(today); d.setMonth(d.getMonth() + 1); return fmt(d); }
+  if (s === 'end of month') {
+    const d = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    return fmt(d);
+  }
+
+  const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  if (s.startsWith('next ')) {
+    const dayName = s.slice(5);
+    const dayIdx  = DAYS.indexOf(dayName);
+    if (dayIdx !== -1) {
+      const d    = new Date(today);
+      const diff = (dayIdx - d.getDay() + 7) % 7 || 7;
+      d.setDate(d.getDate() + diff);
+      return fmt(d);
+    }
+  }
+  // Plain day name (e.g. "Friday" = this Friday or next if today is Friday)
+  const plainDay = DAYS.indexOf(s);
+  if (plainDay !== -1) {
+    const d    = new Date(today);
+    const diff = (plainDay - d.getDay() + 7) % 7 || 7;
+    d.setDate(d.getDate() + diff);
+    return fmt(d);
+  }
+
+  // "in N days/weeks"
+  const inMatch = s.match(/^in (\d+)\s*(day|days|week|weeks|month|months)$/);
+  if (inMatch) {
+    const n    = parseInt(inMatch[1], 10);
+    const unit = inMatch[2];
+    const d    = new Date(today);
+    if (unit.startsWith('month')) d.setMonth(d.getMonth() + n);
+    else if (unit.startsWith('week')) d.setDate(d.getDate() + n * 7);
+    else d.setDate(d.getDate() + n);
+    return fmt(d);
+  }
+
+  return null;
+}
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
@@ -29,18 +86,29 @@ const PRIORITY_OPTIONS: { value: Priority; label: string; activeCls: string }[] 
 ];
 
 export function CreateCommitmentDialog({ open, onClose }: Props) {
-  const [description,  setDescription]  = useState('');
-  const [direction,    setDirection]    = useState<Direction>('outgoing');
-  const [counterparty, setCounterparty] = useState('');
-  const [dueDate,      setDueDate]      = useState('');
-  const [priority,     setPriority]     = useState<Priority>(null);
-  const [pending,      startTransition] = useTransition();
+  const [description,   setDescription]   = useState('');
+  const [direction,     setDirection]     = useState<Direction>('outgoing');
+  const [counterparty,  setCounterparty]  = useState('');
+  const [dueDateInput,  setDueDateInput]  = useState('');
+  const [parsedDate,    setParsedDate]    = useState<string | null>(null);
+  const [priority,      setPriority]      = useState<Priority>(null);
+  const [pending,       startTransition]  = useTransition();
+
+  // Compute effective due date from the raw input
+  const dueDate = parsedDate;
+
+  function handleDueDateChange(val: string) {
+    setDueDateInput(val);
+    const p = parseNaturalDate(val);
+    setParsedDate(p);
+  }
 
   function reset() {
     setDescription('');
     setDirection('outgoing');
     setCounterparty('');
-    setDueDate('');
+    setDueDateInput('');
+    setParsedDate(null);
     setPriority(null);
   }
 
@@ -147,14 +215,26 @@ export function CreateCommitmentDialog({ open, onClose }: Props) {
                 Due date
                 <span className="text-muted-foreground font-normal ml-1">(optional)</span>
               </Label>
-              <input
+              <Input
                 id="cc-due-date"
-                type="date"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
+                value={dueDateInput}
+                onChange={(e) => handleDueDateChange(e.target.value)}
+                placeholder="tomorrow, next Friday, in 3 days…"
                 disabled={pending}
-                className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+                className="h-8 text-xs"
               />
+              {dueDateInput && parsedDate && (
+                <p className="text-[11px] text-muted-foreground">
+                  → {new Date(parsedDate + 'T00:00:00').toLocaleDateString('en-US', {
+                    weekday: 'long', month: 'long', day: 'numeric',
+                  })}
+                </p>
+              )}
+              {dueDateInput && !parsedDate && (
+                <p className="text-[11px] text-amber-600">
+                  Try: "tomorrow", "next Friday", "in 3 days", or YYYY-MM-DD
+                </p>
+              )}
             </div>
 
             <div className="space-y-1.5">

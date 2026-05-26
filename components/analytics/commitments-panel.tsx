@@ -111,11 +111,20 @@ export function CommitmentsPanel({
           <p className={cn('text-2xl font-semibold', openCount > 0 && overdueCount > 0 ? 'text-amber-500' : '')}>
             {openCount}
           </p>
-          <p className="text-xs text-muted-foreground">
-            {overdueCount > 0 ? (
-              <span className="text-red-500">{overdueCount} overdue</span>
-            ) : 'all on track'}
-          </p>
+          {overdueCount > 0 ? (
+            <>
+              <p className="text-xs text-red-500 font-medium">
+                {overdueCount} overdue
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {overdueCount === 1 ? 'needs attention' : 'need attention'}
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-green-600 dark:text-green-400">
+              Clean slate — none overdue
+            </p>
+          )}
         </div>
 
         {/* New this week */}

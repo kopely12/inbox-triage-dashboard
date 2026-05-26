@@ -1,4 +1,5 @@
-import { cn } from '@/lib/utils';
+import { cn }   from '@/lib/utils';
+import { Info } from 'lucide-react';
 
 export type HeatmapDay = {
   date:  string; // YYYY-MM-DD
@@ -130,7 +131,15 @@ export function HabitHeatmap({ days, totalTriages }: { days: HeatmapDay[]; total
 
       {/* Footer stats */}
       <div className="flex items-center justify-between pt-1 text-xs text-muted-foreground">
-        <span>{totalTriages} triage{totalTriages !== 1 ? 's' : ''} in the past year</span>
+        <span className="flex items-center gap-1">
+          {totalTriages} triage{totalTriages !== 1 ? 's' : ''} in the past year
+          <span
+            title="The heatmap always shows the most recent 52 weeks, regardless of the range filter selected above. Range filters apply only to the stats and charts below."
+            className="cursor-help inline-flex"
+          >
+            <Info className="w-3 h-3 shrink-0" />
+          </span>
+        </span>
         <div className="flex items-center gap-3">
           {streak > 0 && (
             <span className="text-chart-2 font-medium">{streak}-day streak</span>

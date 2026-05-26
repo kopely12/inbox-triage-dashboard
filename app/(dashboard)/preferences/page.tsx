@@ -3,10 +3,12 @@ import { supabaseAdmin }  from '@/lib/supabase';
 import { redirect }       from 'next/navigation';
 import Link               from 'next/link';
 import { Info, Download } from 'lucide-react';
-import { ExtensionPrefsForm }   from '@/components/settings/extension-prefs-form';
-import { PreferencesForm }      from '@/components/settings/preferences-form';
-import { DeleteAccountDialog }  from '@/components/settings/delete-account-dialog';
-import { GmailConnectionCard }  from '@/components/settings/gmail-connection-card';
+import { ExtensionPrefsForm }      from '@/components/settings/extension-prefs-form';
+import { PreferencesForm }         from '@/components/settings/preferences-form';
+import { DeleteAccountDialog }     from '@/components/settings/delete-account-dialog';
+import { GmailConnectionCard }     from '@/components/settings/gmail-connection-card';
+import { PreferencesScrollSpy }    from '@/components/settings/preferences-scroll-spy';
+import { PreferencesSearch }       from '@/components/settings/preferences-search';
 import { PREFS_DEFAULTS, type ExtensionPrefs } from '@/lib/extension-prefs';
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -42,11 +44,16 @@ export default async function PreferencesPage() {
 
   return (
     <div className="max-w-2xl space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold">Preferences</h2>
-        <p className="text-sm text-muted-foreground">
-          Configure how the extension scans, prioritises, and surfaces your email.
-        </p>
+      <PreferencesScrollSpy />
+
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-lg font-semibold">Preferences</h2>
+          <p className="text-sm text-muted-foreground">
+            Configure how the extension scans, prioritises, and surfaces your email.
+          </p>
+        </div>
+        <PreferencesSearch />
       </div>
 
       {/* Sync note */}

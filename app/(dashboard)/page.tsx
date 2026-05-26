@@ -7,10 +7,11 @@ import {
 } from '@/components/ui/card';
 import { Badge }   from '@/components/ui/badge';
 import { Button }  from '@/components/ui/button';
-import { MarkDoneButton } from '@/components/commitments/commitment-row-actions';
+import { MarkDoneButton }         from '@/components/commitments/commitment-row-actions';
+import { DismissWaitingButton }   from '@/components/overview/dismiss-waiting-button';
 import {
   CheckSquare, AlertTriangle, ArrowUpRight,
-  Inbox, ExternalLink, CalendarDays, Timer, Clock, Zap,
+  Inbox, ExternalLink, CalendarDays, Timer, Clock, Zap, TrendingUp,
 } from 'lucide-react';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -79,9 +80,19 @@ export default async function OverviewPage() {
   const dow = today.getDay(); // 0 = Sunday
   endOfWeek.setDate(today.getDate() + (dow === 0 ? 0 : 7 - dow));
 
-  const todayISO     = today.toISOString().slice(0, 10);
-  const endOfWeekISO = endOfWeek.toISOString().slice(0, 10);
-  const sevenAgoISO  = sevenDaysAgo.toISOString();
+  // Start of current week (Monday)
+  const startOfWeek = new Date(today);
+  startOfWeek.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
+
+  // Start of prior week
+  const startOfPriorWeek = new Date(startOfWeek);
+  startOfPriorWeek.setDate(startOfWeek.getDate() - 7);
+
+  const todayISO          = today.toISOString().slice(0, 10);
+  const endOfWeekISO      = endOfWeek.toISOString().slice(0, 10);
+  const sevenAgoISO       = sevenDaysAgo.toISOString();
+  const startOfWeekISO    = startOfWeek.toISOString();
+  const startOfPriorWeekISO = startOfPriorWeek.toISOString();
 
   const weekLabel = `${today.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}–${
     endOfWeek.toLocaleDateString('en-US', { day: 'numeric' })}`;
@@ -96,6 +107,8 @@ export default async function OverviewPage() {
     { data: urgentItems },
     waitingCountResult,
     waitingItemsResult,
+    { count: thisWeekCreatedCount },
+    { count: lastWeekCreatedCount },
   ] = await Promise.all([
 
     // Last triage session
@@ -161,11 +174,29 @@ export default async function OverviewPage() {
       .order('created_at', { ascending: true })
       .limit(5)
       .then((r) => r, () => ({ data: null, error: null })),
+
+    // Commitments created this week (for WoW delta)
+    supabaseAdmin.from('commitments')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .gte('scanned_at', startOfWeekISO),
+
+    // Commitments created last week (for WoW delta)
+    supabaseAdmin.from('commitments')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .gte('scanned_at', startOfPriorWeekISO)
+      .lt('scanned_at', startOfWeekISO),
   ]);
 
-  const health       = extensionHealth(lastSession?.triggered_at ?? null);
-  const waitingCount = (waitingCountResult  as any)?.count ?? null;
-  const waitingItems = (waitingItemsResult  as any)?.data  ?? null;
+  const health          = extensionHealth(lastSession?.triggered_at ?? null);
+  const waitingCount    = (waitingCountResult  as any)?.count ?? null;
+  const waitingItems    = (waitingItemsResult  as any)?.data  ?? null;
+  const thisWeekCreated = thisWeekCreatedCount ?? 0;
+  const lastWeekCreated = lastWeekCreatedCount ?? 0;
+  const wowDelta        = lastWeekCreated > 0
+    ? Math.round(((thisWeekCreated - lastWeekCreated) / lastWeekCreated) * 100)
+    : null;
 
   // Categorise urgent items: overdue vs due-soon
   const urgentList = (urgentItems ?? [])
@@ -296,7 +327,19 @@ export default async function OverviewPage() {
                     ↓ {resolvedThisWeek} resolved this week
                   </p>
                 ) : (
-                  <p className="text-xs text-muted-foreground">commitments</p>
+                  <p className="text-xs text-muted-foreground">all open commitments</p>
+                )}
+                {thisWeekCreated > 0 && (
+                  <p className={[
+                    'text-xs mt-0.5',
+                    wowDelta !== null && wowDelta > 0 ? 'text-amber-600 dark:text-amber-400' :
+                    wowDelta !== null && wowDelta < 0 ? 'text-green-600 dark:text-green-400' :
+                    'text-muted-foreground',
+                  ].join(' ')}>
+                    {wowDelta !== null
+                      ? `${wowDelta > 0 ? '+' : ''}${wowDelta}% vs last week`
+                      : `${thisWeekCreated} new this week`}
+                  </p>
                 )}
               </div>
             </div>
@@ -363,6 +406,13 @@ export default async function OverviewPage() {
             </Link>
           </Button>
         )}
+        {dueThisWeek > 0 && (
+          <Button asChild variant="outline" size="sm" className="gap-1.5">
+            <Link href="/commitments?status=open&sort=due">
+              <CalendarDays className="w-3.5 h-3.5" /> View due this week
+            </Link>
+          </Button>
+        )}
       </div>
 
       {/* My Week */}
@@ -375,7 +425,9 @@ export default async function OverviewPage() {
                   <CalendarDays className="w-4 h-4 text-muted-foreground" />
                   This week
                 </CardTitle>
-                <CardDescription>{weekLabel}</CardDescription>
+                <CardDescription>
+                  {weekLabel} · Sorted by urgency: overdue first, then earliest due date
+                </CardDescription>
               </div>
               <Button asChild variant="ghost" size="sm" className="gap-1 text-xs">
                 <Link href="/commitments">View all <ArrowUpRight className="w-3 h-3" /></Link>
@@ -506,13 +558,16 @@ export default async function OverviewPage() {
                         {since && <span>{relativeTime(since)}</span>}
                       </div>
                     </div>
-                    {gmail && (
-                      <Button asChild variant="ghost" size="icon-sm" title="View in Gmail">
-                        <a href={gmail} target="_blank" rel="noopener noreferrer">
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </Button>
-                    )}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {gmail && (
+                        <Button asChild variant="ghost" size="icon-sm" title="View in Gmail">
+                          <a href={gmail} target="_blank" rel="noopener noreferrer">
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </Button>
+                      )}
+                      <DismissWaitingButton id={w.id} />
+                    </div>
                   </div>
                 );
               })}
