@@ -6,7 +6,7 @@ import { toast }            from 'sonner';
 import {
   RefreshCw, Inbox, Trash2, Archive, BellOff, Undo2,
   ChevronDown, AlertTriangle, CheckCircle2, Loader2,
-  ExternalLink, MailX, Filter,
+  MailX, Filter, Download, Sparkles, TriangleAlert,
 } from 'lucide-react';
 import {
   Card, CardContent, CardHeader, CardTitle,
@@ -85,12 +85,13 @@ const CATEGORY_META: Record<string, { label: string; color: string; bg: string }
 };
 
 const ACTION_META: Record<string, { label: string; description: string; destructive: boolean }> = {
-  unsubscribe:         { label: 'Unsubscribe',         description: 'Send an unsubscribe request to this sender.',                 destructive: false },
-  bulk_delete:         { label: 'Delete All Emails',   description: 'Move all emails from this sender to trash.',                  destructive: true  },
-  auto_archive:        { label: 'Auto-archive',        description: 'New emails from this sender will skip your inbox.',           destructive: false },
-  remove_auto_archive: { label: 'Remove Auto-archive', description: 'Stop auto-archiving emails from this sender.',               destructive: false },
-  resubscribe:         { label: 'Resubscribe',         description: 'Mark as resubscribed and clear auto-archive if active.',      destructive: false },
-  ignore:              { label: 'Hide from Report',    description: 'Remove this sender from your inbox noise report.',            destructive: false },
+  unsubscribe:         { label: 'Unsubscribe',           description: 'Send an unsubscribe request to this sender.',              destructive: false },
+  bulk_delete:         { label: 'Delete All Emails',     description: 'Move all emails from this sender to trash.',               destructive: true  },
+  auto_archive:        { label: 'Auto-archive',          description: 'New emails from this sender will skip your inbox.',        destructive: false },
+  remove_auto_archive: { label: 'Remove Auto-archive',   description: 'Stop auto-archiving emails from this sender.',            destructive: false },
+  resubscribe:         { label: 'Resubscribe',           description: 'Mark as resubscribed and clear auto-archive if active.',   destructive: false },
+  ignore:              { label: 'Hide from Report',      description: 'Remove this sender from your inbox noise report.',         destructive: false },
+  clean_never_engage:  { label: 'Clean Never Engage',    description: 'Unsubscribe + delete emails from all Never Open senders.', destructive: true  },
 };
 
 function formatDate(iso: string | null) {
@@ -128,11 +129,51 @@ function CategoryBadge({ category }: { category: string }) {
   );
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Returns true when a sender is still sending after being unsubscribed (7-day grace). */
+function isStillReceiving(s: SenderRow): boolean {
+  if (s.unsubscribe_status !== 'unsubscribed' || !s.unsubscribed_at || !s.last_email_date) return false;
+  const gracePeriodMs = 7 * 24 * 60 * 60 * 1000;
+  return new Date(s.last_email_date).getTime() > new Date(s.unsubscribed_at).getTime() + gracePeriodMs;
+}
+
+function exportSendersAsCSV(senders: SenderRow[]) {
+  const headers = [
+    'Sender Email', 'Sender Name', 'Category', 'Emails Received',
+    'Emails Opened', 'Engagement %', 'Last Email', 'Unsubscribe Status',
+    'Auto-archived', 'Has Unsubscribe Link',
+  ];
+  const rows = senders.map((s) => [
+    s.sender_email,
+    s.sender_name ?? '',
+    CATEGORY_META[s.category]?.label ?? s.category,
+    s.emails_received,
+    s.emails_opened,
+    `${Math.round((s.engagement_rate ?? 0) * 100)}%`,
+    s.last_email_date ? new Date(s.last_email_date).toLocaleDateString() : '',
+    s.unsubscribe_status ?? '',
+    s.auto_archive_enabled ? 'Yes' : 'No',
+    s.has_unsubscribe_header ? 'Yes' : 'No',
+  ]);
+  const csv = [headers, ...rows]
+    .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `sender-intelligence-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ── Confirm Modal ──────────────────────────────────────────────────────────────
 
 interface ConfirmState {
-  action:   string;
-  senders:  SenderRow[];
+  action:          string;
+  senders:         SenderRow[];
+  deleteExisting?: boolean;
 }
 
 function ConfirmModal({
@@ -140,13 +181,15 @@ function ConfirmModal({
   isPending,
   onConfirm,
   onClose,
+  onToggleDeleteExisting,
 }: {
-  state:      ConfirmState;
-  isPending:  boolean;
-  onConfirm:  () => void;
-  onClose:    () => void;
+  state:                   ConfirmState;
+  isPending:               boolean;
+  onConfirm:               () => void;
+  onClose:                 () => void;
+  onToggleDeleteExisting?: (v: boolean) => void;
 }) {
-  const meta         = ACTION_META[state.action];
+  const meta         = ACTION_META[state.action] ?? ACTION_META['ignore'];
   const totalEmails  = state.senders.reduce((s, r) => s + r.emails_received, 0);
   const senderCount  = state.senders.length;
   const plural       = senderCount > 1 ? 'senders' : 'sender';
@@ -185,11 +228,31 @@ function ConfirmModal({
                 Their emails will not be affected.
               </>
             )}
-            {!['bulk_delete', 'unsubscribe', 'auto_archive', 'ignore'].includes(state.action) && (
+            {state.action === 'clean_never_engage' && (
+              <>
+                For <strong>{senderCount} Never Open {plural}</strong>: unsubscribe those with
+                unsubscribe links, and optionally delete all their emails.
+                This is the fastest way to clear inbox noise.
+              </>
+            )}
+            {!['bulk_delete', 'unsubscribe', 'auto_archive', 'ignore', 'clean_never_engage'].includes(state.action) && (
               <>{meta.description} Applies to <strong>{senderCount} {plural}</strong>.</>
             )}
           </DialogDescription>
         </DialogHeader>
+
+        {/* "Also delete emails" checkbox — shown for unsubscribe actions */}
+        {(state.action === 'unsubscribe' || state.action === 'clean_never_engage') && onToggleDeleteExisting && (
+          <label className="flex items-center gap-2 text-sm cursor-pointer mt-1">
+            <input
+              type="checkbox"
+              checked={state.deleteExisting ?? false}
+              onChange={(e) => onToggleDeleteExisting(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            <span>Also move all existing emails from {senderCount > 1 ? 'these senders' : 'this sender'} to trash</span>
+          </label>
+        )}
 
         {/* Sender list (capped at 5) */}
         {senderCount <= 8 && (
@@ -230,12 +293,13 @@ function ConfirmModal({
 // ── Category Tabs ──────────────────────────────────────────────────────────────
 
 const CATEGORIES = [
-  { key: 'all',           label: 'All' },
-  { key: 'never_engage',  label: 'Never Open' },
-  { key: 'rarely_engage', label: 'Rarely Open' },
-  { key: 'regular',       label: 'Regular' },
-  { key: 'known_contact', label: 'Known Contact' },
-  { key: 'transactional', label: 'Transactional' },
+  { key: 'all',              label: 'All' },
+  { key: 'never_engage',     label: 'Never Open' },
+  { key: 'rarely_engage',    label: 'Rarely Open' },
+  { key: 'regular',          label: 'Regular' },
+  { key: 'known_contact',    label: 'Known Contact' },
+  { key: 'transactional',    label: 'Transactional' },
+  { key: 'still_receiving',  label: 'Still Receiving' },
 ] as const;
 
 // ── Main Component ─────────────────────────────────────────────────────────────
@@ -298,7 +362,9 @@ export function SenderIntelligenceClient({
 
   const filteredSenders = activeCategory === 'all'
     ? initialSenders
-    : initialSenders.filter((s) => s.category === activeCategory);
+    : activeCategory === 'still_receiving'
+      ? initialSenders.filter(isStillReceiving)
+      : initialSenders.filter((s) => s.category === activeCategory);
 
   // ── Selection helpers ────────────────────────────────────────────────────────
 
@@ -333,47 +399,78 @@ export function SenderIntelligenceClient({
 
   // ── Execute action ───────────────────────────────────────────────────────────
 
-  function openConfirm(action: string, targetSenders: SenderRow[]) {
+  function openConfirm(action: string, targetSenders: SenderRow[], deleteExisting = false) {
     if (isFree && targetSenders.length > 1) {
       toast.error('Bulk actions require a Pro plan. Select one sender at a time on the free plan.');
       return;
     }
-    const needsConfirm = ['bulk_delete', 'unsubscribe', 'auto_archive', 'ignore'].includes(action);
+    const needsConfirm = ['bulk_delete', 'unsubscribe', 'auto_archive', 'ignore', 'clean_never_engage'].includes(action);
     if (needsConfirm) {
-      setConfirmState({ action, senders: targetSenders });
+      setConfirmState({ action, senders: targetSenders, deleteExisting });
     } else {
-      executeAction(action, targetSenders);
+      executeAction(action, targetSenders, deleteExisting);
     }
   }
 
-  function executeAction(action: string, targetSenders: SenderRow[]) {
-    const emails = targetSenders.map((s) => s.sender_email);
-    startTransition(async () => {
-      const result = await executeBulkAction(action, emails, false);
+  function openCleanNeverEngage() {
+    const neverSenders = initialSenders.filter((s) => s.category === 'never_engage');
+    if (neverSenders.length === 0) {
+      toast.info('No Never Open senders to clean up.');
+      return;
+    }
+    if (isFree && neverSenders.length > 1) {
+      toast.error('Bulk actions require a Pro plan.', {
+        action: { label: 'Upgrade', onClick: () => router.push('/billing') },
+      });
+      return;
+    }
+    setConfirmState({ action: 'clean_never_engage', senders: neverSenders, deleteExisting: true });
+  }
 
-      if (result.error) {
-        if (result.upgrade) {
-          toast.error(result.error, {
-            action: { label: 'Upgrade', onClick: () => router.push('/billing') },
-          });
-        } else {
-          toast.error(result.error);
+  function executeAction(action: string, targetSenders: SenderRow[], deleteExisting = false) {
+    startTransition(async () => {
+      let succeeded = 0, failed = 0;
+
+      if (action === 'clean_never_engage') {
+        // Two sequential calls: unsubscribe those with headers, delete emails from all
+        const withHeaders    = targetSenders.filter((s) => s.has_unsubscribe_header);
+        const withoutHeaders = targetSenders.filter((s) => !s.has_unsubscribe_header);
+
+        if (withHeaders.length > 0) {
+          const r = await executeBulkAction('unsubscribe', withHeaders.map((s) => s.sender_email), true);
+          if (r.error && r.upgrade) {
+            toast.error(r.error, { action: { label: 'Upgrade', onClick: () => router.push('/billing') } });
+            return;
+          }
+          succeeded += r.succeeded; failed += r.failed;
         }
-        return;
+        if (withoutHeaders.length > 0) {
+          const r = await executeBulkAction('bulk_delete', withoutHeaders.map((s) => s.sender_email), false);
+          succeeded += r.succeeded; failed += r.failed;
+        }
+      } else {
+        const emails = targetSenders.map((s) => s.sender_email);
+        const result = await executeBulkAction(action, emails, deleteExisting);
+
+        if (result.error) {
+          if (result.upgrade) {
+            toast.error(result.error, { action: { label: 'Upgrade', onClick: () => router.push('/billing') } });
+          } else {
+            toast.error(result.error);
+          }
+          return;
+        }
+        succeeded = result.succeeded; failed = result.failed;
       }
 
       setSelected(new Set());
       setConfirmState(null);
 
-      const msg = result.succeeded > 0
-        ? `Done — ${result.succeeded} sender${result.succeeded > 1 ? 's' : ''} updated.`
+      const msg = succeeded > 0
+        ? `Done — ${succeeded} sender${succeeded > 1 ? 's' : ''} updated.`
         : 'No changes made.';
-
-      if (result.failed > 0) {
-        toast.warning(`${msg} ${result.failed} failed.`);
-      } else {
-        toast.success(msg);
-      }
+      if (failed > 0) toast.warning(`${msg} ${failed} failed.`);
+      else toast.success(msg);
 
       router.refresh();
     });
@@ -382,7 +479,8 @@ export function SenderIntelligenceClient({
   // ── Count for each category tab ──────────────────────────────────────────────
 
   function categoryCount(key: string) {
-    if (key === 'all') return initialSenders.length;
+    if (key === 'all')             return initialSenders.length;
+    if (key === 'still_receiving') return initialSenders.filter(isStillReceiving).length;
     return initialSenders.filter((s) => s.category === key).length;
   }
 
@@ -457,7 +555,7 @@ export function SenderIntelligenceClient({
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {/* Refresh status */}
           {refreshStatus === 'running' && (
             <span className="flex items-center gap-1.5 text-sm text-amber-600">
@@ -466,9 +564,36 @@ export function SenderIntelligenceClient({
             </span>
           )}
           {refreshStatus === 'completed' && lastRefreshed && (
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs text-muted-foreground mr-1">
               Updated {formatRelative(lastRefreshed)}
             </span>
+          )}
+
+          {/* CSV export */}
+          {initialSenders.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => exportSendersAsCSV(filteredSenders)}
+              title="Export current view as CSV"
+            >
+              <Download className="w-3.5 h-3.5 mr-1.5" />
+              Export
+            </Button>
+          )}
+
+          {/* Clean Never Engage */}
+          {summary.never_engage_count > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={openCleanNeverEngage}
+              disabled={isPending}
+              className="border-red-200 text-red-700 hover:bg-red-50 hover:border-red-300"
+            >
+              <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+              Clean Never Engage
+            </Button>
           )}
 
           {/* Refresh button */}
@@ -671,8 +796,9 @@ export function SenderIntelligenceClient({
         <ConfirmModal
           state={confirmState}
           isPending={isPending}
-          onConfirm={() => executeAction(confirmState.action, confirmState.senders)}
+          onConfirm={() => executeAction(confirmState.action, confirmState.senders, confirmState.deleteExisting ?? false)}
           onClose={() => setConfirmState(null)}
+          onToggleDeleteExisting={(v) => setConfirmState((prev) => prev ? { ...prev, deleteExisting: v } : prev)}
         />
       )}
     </div>
@@ -787,10 +913,16 @@ function SenderTableRow({
       {/* Status badges */}
       <td className="px-4 py-3 hidden xl:table-cell">
         <div className="flex items-center gap-1 flex-wrap">
-          {sender.unsubscribe_status === 'unsubscribed' && (
+          {sender.unsubscribe_status === 'unsubscribed' && !isStillReceiving(sender) && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-green-100 text-green-700 border border-green-200">
               <CheckCircle2 className="w-3 h-3" />
               Unsubscribed
+            </span>
+          )}
+          {isStillReceiving(sender) && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-orange-100 text-orange-700 border border-orange-200" title="Still receiving emails despite unsubscribing — consider marking as spam">
+              <TriangleAlert className="w-3 h-3" />
+              Still receiving
             </span>
           )}
           {sender.auto_archive_enabled && (
