@@ -5,10 +5,10 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { HardDrive, RefreshCw, Loader2, Trash2, AlertTriangle } from 'lucide-react';
+import { HardDrive, RefreshCw, Loader2, Trash2, AlertTriangle, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn }     from '@/lib/utils';
-import { getStorageAnalysis, type StorageResult, type StorageSender, type LargeEmail } from '@/app/actions/engagement';
+import { getStorageAnalysis, trashEmail, type StorageResult, type StorageSender, type LargeEmail } from '@/app/actions/engagement';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -179,8 +179,29 @@ function SenderStorageTable({
   );
 }
 
-function LargeEmailTable({ emails }: { emails: LargeEmail[] }) {
-  if (!emails.length) return null;
+function LargeEmailTable({ emails: initialEmails }: { emails: LargeEmail[] }) {
+  const [emails,   setEmails]   = useState<LargeEmail[]>(initialEmails);
+  const [deleting, setDeleting] = useState<Set<string>>(new Set());
+
+  if (!emails.length) return (
+    <div className="text-center py-12 text-muted-foreground text-sm">
+      No large emails found.
+    </div>
+  );
+
+  async function handleTrash(email: LargeEmail) {
+    setDeleting((prev) => new Set(prev).add(email.id));
+    const { success, error } = await trashEmail(email.id);
+    if (error) {
+      toast.error(error);
+      setDeleting((prev) => { const next = new Set(prev); next.delete(email.id); return next; });
+      return;
+    }
+    if (success) {
+      toast.success(`Moved "${email.subject || 'email'}" to trash.`);
+      setEmails((prev) => prev.filter((e) => e.id !== email.id));
+    }
+  }
 
   return (
     <table className="w-full text-sm">
@@ -190,13 +211,14 @@ function LargeEmailTable({ emails }: { emails: LargeEmail[] }) {
           <th className="px-6 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">From</th>
           <th className="px-6 py-3 text-right font-medium text-muted-foreground">Size</th>
           <th className="px-6 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Date</th>
+          <th className="px-6 py-3 w-10" />
         </tr>
       </thead>
       <tbody className="divide-y divide-border">
         {emails.map((e) => (
           <tr key={e.id} className="hover:bg-muted/30 transition-colors">
             <td className="px-6 py-3 max-w-sm">
-              <span className="font-medium line-clamp-1">{e.subject}</span>
+              <span className="font-medium line-clamp-1">{e.subject || '(no subject)'}</span>
             </td>
             <td className="px-6 py-3 text-muted-foreground hidden md:table-cell truncate max-w-[180px]">
               {e.sender_name || e.sender_email}
@@ -206,6 +228,21 @@ function LargeEmailTable({ emails }: { emails: LargeEmail[] }) {
             </td>
             <td className="px-6 py-3 text-muted-foreground hidden lg:table-cell">
               {e.date_ts ? new Date(e.date_ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+            </td>
+            <td className="px-6 py-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                onClick={() => handleTrash(e)}
+                disabled={deleting.has(e.id)}
+                title="Move to trash"
+              >
+                {deleting.has(e.id)
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <Trash2 className="w-3.5 h-3.5" />
+                }
+              </Button>
             </td>
           </tr>
         ))}

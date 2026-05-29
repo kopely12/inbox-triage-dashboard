@@ -353,6 +353,26 @@ export async function runDeepClean(
   }
 }
 
+// ── Trash single email ────────────────────────────────────────────────────────
+
+export async function trashEmail(messageId: string): Promise<{ success: boolean; error?: string }> {
+  const { error, userId } = await requireUser();
+  if (error) return { success: false, error };
+
+  try {
+    const res = await fetch(`${API_URL}/api/engagement/emails/trash`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'x-service-key': SERVICE_KEY },
+      body: JSON.stringify({ user_id: userId, message_id: messageId }),
+    });
+    const data = await res.json();
+    if (!res.ok) return { success: false, error: data.error };
+    return { success: true };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : 'Request failed' };
+  }
+}
+
 // ── Storage analysis ──────────────────────────────────────────────────────────
 
 export async function getStorageAnalysis(force = false): Promise<{ result?: StorageResult; error?: string }> {
