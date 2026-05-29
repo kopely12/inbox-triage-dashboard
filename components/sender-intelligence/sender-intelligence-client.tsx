@@ -8,6 +8,7 @@ import {
   ChevronDown, AlertTriangle, CheckCircle2, Loader2,
   MailX, Filter, Download, Sparkles, TriangleAlert,
   Layers, Eye, History, X, RotateCcw,
+  HardDrive, Zap, Shield, ListChecks,
 } from 'lucide-react';
 import {
   Card, CardContent, CardHeader, CardTitle,
@@ -26,7 +27,12 @@ import {
   triggerRefresh, getEngagementStatus, executeBulkAction,
   getActionHistory, undoAction, getSenderPreview,
   type ActionResult, type ActionHistoryItem, type SenderPreview,
+  type CleanupJob,
 } from '@/app/actions/engagement';
+import { StorageTab }     from './storage-tab';
+import { DeepCleanPanel } from './deep-clean-panel';
+import { ScreenerTab }    from './screener-tab';
+import { ActiveJobBanner, JobsPanel } from './jobs-panel';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -408,6 +414,10 @@ export function SenderIntelligenceClient({
 }: Props) {
   const router = useRouter();
 
+  // Top-level navigation
+  const [activeTab, setActiveTab] = useState<'senders' | 'storage' | 'deep_clean' | 'screener' | 'jobs'>('senders');
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+
   // Local state
   const [activeCategory,  setActiveCategory]  = useState<string>('all');
   const [selected,         setSelected]        = useState<Set<string>>(new Set());
@@ -680,9 +690,19 @@ export function SenderIntelligenceClient({
     );
   }
 
+  // ── Top-level tab definitions ────────────────────────────────────────────────
+
+  const TOP_TABS = [
+    { key: 'senders'    as const, label: 'Senders',    icon: Inbox      },
+    { key: 'storage'    as const, label: 'Storage',    icon: HardDrive  },
+    { key: 'deep_clean' as const, label: 'Deep Clean', icon: Zap        },
+    { key: 'screener'   as const, label: 'Screener',   icon: Shield     },
+    { key: 'jobs'       as const, label: 'Jobs',       icon: ListChecks },
+  ];
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      {/* ── Page header ─────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
         <div>
           <h1 className="text-xl font-semibold">Sender Intelligence</h1>
@@ -691,327 +711,380 @@ export function SenderIntelligenceClient({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Refresh status */}
-          {refreshStatus === 'running' && (
-            <span className="flex items-center gap-1.5 text-sm text-amber-600">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              Analyzing…
-            </span>
-          )}
-          {refreshStatus === 'completed' && lastRefreshed && (
-            <span className="text-xs text-muted-foreground mr-1">
-              Updated {formatRelative(lastRefreshed)}
-            </span>
-          )}
-
-          {/* History */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleOpenHistory}
-            title="View action history"
-          >
-            <History className="w-3.5 h-3.5 mr-1.5" />
-            History
-          </Button>
-
-          {/* Domain grouping toggle */}
-          {initialSenders.length > 0 && (
-            <Button
-              variant={groupByDomainOn ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => setGroupByDomainOn((v) => !v)}
-              title="Group senders by domain"
-            >
-              <Layers className="w-3.5 h-3.5 mr-1.5" />
-              {groupByDomainOn ? 'Ungroup' : 'Group by domain'}
-            </Button>
-          )}
-
-          {/* CSV export */}
-          {initialSenders.length > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => exportSendersAsCSV(filteredSenders)}
-              title="Export current view as CSV"
-            >
-              <Download className="w-3.5 h-3.5 mr-1.5" />
-              Export
-            </Button>
-          )}
-
-          {/* Clean Never Engage */}
-          {summary.never_engage_count > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={openCleanNeverEngage}
-              disabled={isPending}
-              className="border-red-200 text-red-700 hover:bg-red-50 hover:border-red-300"
-            >
-              <Sparkles className="w-3.5 h-3.5 mr-1.5" />
-              Clean Never Engage
-            </Button>
-          )}
-
-          {/* Refresh button */}
-          {isFree && refreshStatus === 'completed' ? (
-            <Button variant="outline" size="sm" onClick={() => router.push('/billing')}>
-              <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-              Refresh
-              <Badge variant="secondary" className="ml-1.5 text-[10px] px-1 py-0">Pro</Badge>
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRefresh}
-              disabled={isRefreshing || refreshStatus === 'running'}
-            >
-              <RefreshCw className={cn('w-3.5 h-3.5 mr-1.5', (isRefreshing || refreshStatus === 'running') && 'animate-spin')} />
-              Refresh
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* ── Running banner (when data exists but a refresh is in progress) ──── */}
-      {refreshStatus === 'running' && initialSenders.length > 0 && (
-        <div className="flex items-center gap-2 px-6 py-2.5 bg-amber-50 border-b border-amber-200 text-amber-800 text-sm shrink-0">
-          <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-          Refresh in progress — results below are from your last analysis. Page will update automatically.
-        </div>
-      )}
-
-      {/* ── Error banner ────────────────────────────────────────────────────── */}
-      {queryError && (
-        <div className="flex items-center gap-2 px-6 py-2.5 bg-red-50 border-b border-red-200 text-red-800 text-sm shrink-0">
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-          Failed to load sender data: {queryError}
-        </div>
-      )}
-
-      {/* ── Summary cards ───────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 px-6 py-4 shrink-0">
-        <StatCard
-          title="Total Senders"
-          value={summary.total_senders.toLocaleString()}
-          sub={`last ${summary.period_days} days`}
-        />
-        <StatCard
-          title="Noise Emails"
-          value={`${summary.noise_percentage}%`}
-          sub={`${summary.total_noise_emails.toLocaleString()} of ${summary.total_emails_analyzed.toLocaleString()} emails`}
-          valueClass={summary.noise_percentage >= 50 ? 'text-red-600' : summary.noise_percentage >= 25 ? 'text-amber-600' : 'text-foreground'}
-        />
-        <StatCard
-          title="Never Open"
-          value={summary.never_engage_count.toLocaleString()}
-          sub="senders you ignore"
-          valueClass={summary.never_engage_count > 0 ? 'text-red-600' : 'text-foreground'}
-        />
-        <StatCard
-          title="Rarely Open"
-          value={summary.rarely_engage_count.toLocaleString()}
-          sub="low-engagement senders"
-          valueClass={summary.rarely_engage_count > 0 ? 'text-amber-600' : 'text-foreground'}
-        />
-      </div>
-
-      {/* ── Category tabs ───────────────────────────────────────────────────── */}
-      <div className="flex gap-1 px-6 pb-3 overflow-x-auto shrink-0">
-        {CATEGORIES.map(({ key, label }) => {
-          const count  = categoryCount(key);
-          const active = activeCategory === key;
-          return (
-            <button
-              key={key}
-              onClick={() => { setActiveCategory(key); setSelected(new Set()); }}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap',
-                active
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-              )}
-            >
-              {label}
-              <span className={cn(
-                'text-xs px-1.5 py-0.5 rounded-full',
-                active ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground',
-              )}>
-                {count}
+        {/* Right-side controls — only shown on the Senders tab */}
+        {activeTab === 'senders' && (
+          <div className="flex items-center gap-2">
+            {refreshStatus === 'running' && (
+              <span className="flex items-center gap-1.5 text-sm text-amber-600">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Analyzing…
               </span>
-            </button>
-          );
-        })}
+            )}
+            {refreshStatus === 'completed' && lastRefreshed && (
+              <span className="text-xs text-muted-foreground mr-1">
+                Updated {formatRelative(lastRefreshed)}
+              </span>
+            )}
+            <Button variant="ghost" size="sm" onClick={handleOpenHistory} title="View action history">
+              <History className="w-3.5 h-3.5 mr-1.5" />
+              History
+            </Button>
+            {initialSenders.length > 0 && (
+              <Button
+                variant={groupByDomainOn ? 'secondary' : 'ghost'}
+                size="sm"
+                onClick={() => setGroupByDomainOn((v) => !v)}
+                title="Group senders by domain"
+              >
+                <Layers className="w-3.5 h-3.5 mr-1.5" />
+                {groupByDomainOn ? 'Ungroup' : 'Group by domain'}
+              </Button>
+            )}
+            {initialSenders.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => exportSendersAsCSV(filteredSenders)}
+                title="Export current view as CSV"
+              >
+                <Download className="w-3.5 h-3.5 mr-1.5" />
+                Export
+              </Button>
+            )}
+            {summary.never_engage_count > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={openCleanNeverEngage}
+                disabled={isPending}
+                className="border-red-200 text-red-700 hover:bg-red-50 hover:border-red-300"
+              >
+                <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                Clean Never Engage
+              </Button>
+            )}
+            {isFree && refreshStatus === 'completed' ? (
+              <Button variant="outline" size="sm" onClick={() => router.push('/billing')}>
+                <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                Refresh
+                <Badge variant="secondary" className="ml-1.5 text-[10px] px-1 py-0">Pro</Badge>
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRefresh}
+                disabled={isRefreshing || refreshStatus === 'running'}
+              >
+                <RefreshCw className={cn('w-3.5 h-3.5 mr-1.5', (isRefreshing || refreshStatus === 'running') && 'animate-spin')} />
+                Refresh
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* ── Bulk action bar ─────────────────────────────────────────────────── */}
-      {selected.size > 0 && (
-        <div className="flex items-center gap-3 px-6 py-2.5 bg-primary/5 border-y border-primary/20 shrink-0">
-          <span className="text-sm font-medium text-primary">
-            {selected.size} sender{selected.size > 1 ? 's' : ''} selected
-          </span>
-          <div className="flex items-center gap-2 ml-auto flex-wrap">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => openConfirm('unsubscribe', selectedSenders.filter((s) => s.has_unsubscribe_header))}
-              disabled={isPending || !selectedSenders.some((s) => s.has_unsubscribe_header)}
-            >
-              <MailX className="w-3.5 h-3.5 mr-1.5" />
-              Unsubscribe
-              {isFree && selected.size > 1 && <Badge variant="secondary" className="ml-1.5 text-[10px] px-1 py-0">Pro</Badge>}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => openConfirm('auto_archive', selectedSenders.filter((s) => !s.auto_archive_enabled))}
-              disabled={isPending || !selectedSenders.some((s) => !s.auto_archive_enabled)}
-            >
-              <Archive className="w-3.5 h-3.5 mr-1.5" />
-              Auto-archive
-              {isFree && selected.size > 1 && <Badge variant="secondary" className="ml-1.5 text-[10px] px-1 py-0">Pro</Badge>}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => openConfirm('ignore', selectedSenders)}
-              disabled={isPending}
-            >
-              <BellOff className="w-3.5 h-3.5 mr-1.5" />
-              Hide
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => openConfirm('bulk_delete', selectedSenders)}
-              disabled={isPending}
-            >
-              <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-              Delete Emails
-              {isFree && selected.size > 1 && <Badge variant="secondary" className="ml-1.5 text-[10px] px-1 py-0">Pro</Badge>}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setSelected(new Set())}
-            >
-              Clear
-            </Button>
+      {/* ── Active job banner (shown on all tabs when a job is running) ──────── */}
+      {activeJobId && (
+        <ActiveJobBanner
+          jobId={activeJobId}
+          onComplete={() => setActiveJobId(null)}
+        />
+      )}
+
+      {/* ── Top-level tab bar ────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-1 px-6 pt-3 pb-0 border-b border-border shrink-0 overflow-x-auto">
+        {TOP_TABS.map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key)}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap -mb-px',
+              activeTab === key
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border',
+            )}
+          >
+            <Icon className="w-3.5 h-3.5" />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Tab panels ──────────────────────────────────────────────────────── */}
+
+      {/* Storage */}
+      {activeTab === 'storage' && (
+        <StorageTab
+          onDeleteSender={(email) => {
+            const sender = initialSenders.find((s) => s.sender_email === email);
+            if (sender) openConfirm('bulk_delete', [sender]);
+          }}
+        />
+      )}
+
+      {/* Deep Clean */}
+      {activeTab === 'deep_clean' && (
+        <DeepCleanPanel
+          onJobCreated={(job: CleanupJob) => {
+            setActiveJobId(job.id);
+            setActiveTab('jobs');
+          }}
+        />
+      )}
+
+      {/* Screener */}
+      {activeTab === 'screener' && <ScreenerTab />}
+
+      {/* Jobs */}
+      {activeTab === 'jobs' && (
+        <div className="flex-1 overflow-auto px-6 py-6">
+          <div className="max-w-2xl mx-auto">
+            <div className="flex items-center gap-2 mb-6">
+              <ListChecks className="w-5 h-5 text-primary" />
+              <h2 className="text-lg font-semibold">Cleanup Jobs</h2>
+            </div>
+            <JobsPanel />
           </div>
         </div>
       )}
 
-      {/* ── Sender table ────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-sm">
-          <thead className="sticky top-0 z-10 bg-card border-b border-border">
-            <tr>
-              <th className="px-4 py-3 w-10">
-                <input
-                  type="checkbox"
-                  checked={allFilteredSelected}
-                  onChange={toggleAll}
-                  className="rounded border-gray-300 cursor-pointer"
-                  title="Select all"
-                />
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Sender</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Category</th>
-              <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden lg:table-cell">Emails</th>
-              <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden lg:table-cell">Engagement</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden xl:table-cell">Last Email</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden xl:table-cell">Status</th>
-              <th className="px-4 py-3 w-10" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {filteredSenders.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="px-4 py-16 text-center text-muted-foreground text-sm">
-                  No senders in this category.
-                </td>
-              </tr>
-            ) : groupByDomainOn ? (
-              groupByDomain(filteredSenders).map((group) => (
-                <DomainGroupRow
-                  key={group.domain}
-                  group={group}
-                  isExpanded={expandedDomains.has(group.domain)}
-                  onToggleExpand={() => setExpandedDomains((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(group.domain)) next.delete(group.domain);
-                    else next.add(group.domain);
-                    return next;
-                  })}
-                  selected={selected}
-                  onToggleRow={toggleRow}
-                  onAction={(action, senders) => openConfirm(action, senders)}
-                  onPreview={(sender) => handleOpenPreview(sender)}
-                  isPending={isPending}
-                />
-              ))
-            ) : (
-              filteredSenders.map((sender) => (
-                <SenderTableRow
-                  key={sender.sender_email}
-                  sender={sender}
-                  isSelected={selected.has(sender.sender_email)}
-                  onToggle={() => toggleRow(sender.sender_email)}
-                  onAction={(action) => openConfirm(action, [sender])}
-                  onPreview={() => handleOpenPreview(sender)}
-                  isPending={isPending}
-                />
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* ── Confirmation modal ───────────────────────────────────────────────── */}
-      {confirmState && (
-        <ConfirmModal
-          state={confirmState}
-          isPending={isPending}
-          onConfirm={() => executeAction(
-            confirmState.action,
-            confirmState.senders,
-            confirmState.deleteExisting ?? false,
-            confirmState.olderThanDays ?? null,
+      {/* Senders (default) */}
+      {activeTab === 'senders' && (
+        <>
+          {/* Running banner */}
+          {refreshStatus === 'running' && initialSenders.length > 0 && (
+            <div className="flex items-center gap-2 px-6 py-2.5 bg-amber-50 border-b border-amber-200 text-amber-800 text-sm shrink-0">
+              <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+              Refresh in progress — results below are from your last analysis. Page will update automatically.
+            </div>
           )}
-          onClose={() => setConfirmState(null)}
-          onToggleDeleteExisting={(v) => setConfirmState((prev) =>
-            prev ? { ...prev, deleteExisting: v, olderThanDays: v ? (prev.olderThanDays ?? 90) : null } : prev
+
+          {/* Error banner */}
+          {queryError && (
+            <div className="flex items-center gap-2 px-6 py-2.5 bg-red-50 border-b border-red-200 text-red-800 text-sm shrink-0">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              Failed to load sender data: {queryError}
+            </div>
           )}
-          onChangeOlderThanDays={(v) => setConfirmState((prev) => prev ? { ...prev, olderThanDays: v } : prev)}
-        />
-      )}
 
-      {/* ── History modal ────────────────────────────────────────────────────── */}
-      {showHistory && (
-        <HistoryModal
-          history={history}
-          loading={historyLoading}
-          onUndo={handleUndo}
-          onClose={() => setShowHistory(false)}
-        />
-      )}
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 px-6 py-4 shrink-0">
+            <StatCard
+              title="Total Senders"
+              value={summary.total_senders.toLocaleString()}
+              sub={`last ${summary.period_days} days`}
+            />
+            <StatCard
+              title="Noise Emails"
+              value={`${summary.noise_percentage}%`}
+              sub={`${summary.total_noise_emails.toLocaleString()} of ${summary.total_emails_analyzed.toLocaleString()} emails`}
+              valueClass={summary.noise_percentage >= 50 ? 'text-red-600' : summary.noise_percentage >= 25 ? 'text-amber-600' : 'text-foreground'}
+            />
+            <StatCard
+              title="Never Open"
+              value={summary.never_engage_count.toLocaleString()}
+              sub="senders you ignore"
+              valueClass={summary.never_engage_count > 0 ? 'text-red-600' : 'text-foreground'}
+            />
+            <StatCard
+              title="Rarely Open"
+              value={summary.rarely_engage_count.toLocaleString()}
+              sub="low-engagement senders"
+              valueClass={summary.rarely_engage_count > 0 ? 'text-amber-600' : 'text-foreground'}
+            />
+          </div>
 
-      {/* ── Preview modal ────────────────────────────────────────────────────── */}
-      {previewSender && (
-        <PreviewModal
-          sender={previewSender}
-          preview={previewData}
-          loading={previewLoading}
-          onAction={(action) => {
-            setPreviewSender(null);
-            openConfirm(action, [previewSender]);
-          }}
-          onClose={() => { setPreviewSender(null); setPreviewData(null); }}
-        />
+          {/* Category tabs */}
+          <div className="flex gap-1 px-6 pb-3 overflow-x-auto shrink-0">
+            {CATEGORIES.map(({ key, label }) => {
+              const count  = categoryCount(key);
+              const active = activeCategory === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => { setActiveCategory(key); setSelected(new Set()); }}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap',
+                    active
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                  )}
+                >
+                  {label}
+                  <span className={cn(
+                    'text-xs px-1.5 py-0.5 rounded-full',
+                    active ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground',
+                  )}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Bulk action bar */}
+          {selected.size > 0 && (
+            <div className="flex items-center gap-3 px-6 py-2.5 bg-primary/5 border-y border-primary/20 shrink-0">
+              <span className="text-sm font-medium text-primary">
+                {selected.size} sender{selected.size > 1 ? 's' : ''} selected
+              </span>
+              <div className="flex items-center gap-2 ml-auto flex-wrap">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openConfirm('unsubscribe', selectedSenders.filter((s) => s.has_unsubscribe_header))}
+                  disabled={isPending || !selectedSenders.some((s) => s.has_unsubscribe_header)}
+                >
+                  <MailX className="w-3.5 h-3.5 mr-1.5" />
+                  Unsubscribe
+                  {isFree && selected.size > 1 && <Badge variant="secondary" className="ml-1.5 text-[10px] px-1 py-0">Pro</Badge>}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openConfirm('auto_archive', selectedSenders.filter((s) => !s.auto_archive_enabled))}
+                  disabled={isPending || !selectedSenders.some((s) => !s.auto_archive_enabled)}
+                >
+                  <Archive className="w-3.5 h-3.5 mr-1.5" />
+                  Auto-archive
+                  {isFree && selected.size > 1 && <Badge variant="secondary" className="ml-1.5 text-[10px] px-1 py-0">Pro</Badge>}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openConfirm('ignore', selectedSenders)}
+                  disabled={isPending}
+                >
+                  <BellOff className="w-3.5 h-3.5 mr-1.5" />
+                  Hide
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => openConfirm('bulk_delete', selectedSenders)}
+                  disabled={isPending}
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                  Delete Emails
+                  {isFree && selected.size > 1 && <Badge variant="secondary" className="ml-1.5 text-[10px] px-1 py-0">Pro</Badge>}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+                  Clear
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Sender table */}
+          <div className="flex-1 overflow-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 z-10 bg-card border-b border-border">
+                <tr>
+                  <th className="px-4 py-3 w-10">
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      onChange={toggleAll}
+                      className="rounded border-gray-300 cursor-pointer"
+                      title="Select all"
+                    />
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Sender</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Category</th>
+                  <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden lg:table-cell">Emails</th>
+                  <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden lg:table-cell">Engagement</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden xl:table-cell">Last Email</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden xl:table-cell">Status</th>
+                  <th className="px-4 py-3 w-10" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {filteredSenders.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-16 text-center text-muted-foreground text-sm">
+                      No senders in this category.
+                    </td>
+                  </tr>
+                ) : groupByDomainOn ? (
+                  groupByDomain(filteredSenders).map((group) => (
+                    <DomainGroupRow
+                      key={group.domain}
+                      group={group}
+                      isExpanded={expandedDomains.has(group.domain)}
+                      onToggleExpand={() => setExpandedDomains((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(group.domain)) next.delete(group.domain);
+                        else next.add(group.domain);
+                        return next;
+                      })}
+                      selected={selected}
+                      onToggleRow={toggleRow}
+                      onAction={(action, senders) => openConfirm(action, senders)}
+                      onPreview={(sender) => handleOpenPreview(sender)}
+                      isPending={isPending}
+                    />
+                  ))
+                ) : (
+                  filteredSenders.map((sender) => (
+                    <SenderTableRow
+                      key={sender.sender_email}
+                      sender={sender}
+                      isSelected={selected.has(sender.sender_email)}
+                      onToggle={() => toggleRow(sender.sender_email)}
+                      onAction={(action) => openConfirm(action, [sender])}
+                      onPreview={() => handleOpenPreview(sender)}
+                      isPending={isPending}
+                    />
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Confirmation modal */}
+          {confirmState && (
+            <ConfirmModal
+              state={confirmState}
+              isPending={isPending}
+              onConfirm={() => executeAction(
+                confirmState.action,
+                confirmState.senders,
+                confirmState.deleteExisting ?? false,
+                confirmState.olderThanDays ?? null,
+              )}
+              onClose={() => setConfirmState(null)}
+              onToggleDeleteExisting={(v) => setConfirmState((prev) =>
+                prev ? { ...prev, deleteExisting: v, olderThanDays: v ? (prev.olderThanDays ?? 90) : null } : prev
+              )}
+              onChangeOlderThanDays={(v) => setConfirmState((prev) => prev ? { ...prev, olderThanDays: v } : prev)}
+            />
+          )}
+
+          {/* History modal */}
+          {showHistory && (
+            <HistoryModal
+              history={history}
+              loading={historyLoading}
+              onUndo={handleUndo}
+              onClose={() => setShowHistory(false)}
+            />
+          )}
+
+          {/* Preview modal */}
+          {previewSender && (
+            <PreviewModal
+              sender={previewSender}
+              preview={previewData}
+              loading={previewLoading}
+              onAction={(action) => {
+                setPreviewSender(null);
+                openConfirm(action, [previewSender]);
+              }}
+              onClose={() => { setPreviewSender(null); setPreviewData(null); }}
+            />
+          )}
+        </>
       )}
     </div>
   );
