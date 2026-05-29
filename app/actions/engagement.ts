@@ -64,6 +64,7 @@ export async function executeBulkAction(
   action: string,
   senderEmails: string[],
   deleteExisting = false,
+  olderThanDays: number | null = null,
 ): Promise<{ succeeded: number; failed: number; results: ActionResult[]; error?: string; upgrade?: boolean }> {
   const { error, userId } = await requireUser();
   if (error) return { succeeded: 0, failed: 0, results: [], error };
@@ -76,11 +77,12 @@ export async function executeBulkAction(
         'x-service-key': SERVICE_KEY,
       },
       body: JSON.stringify({
-        user_id:         userId,
+        user_id:                userId,
         action,
-        sender_emails:   senderEmails,
-        delete_existing: deleteExisting,
-        confirmed:       true,
+        sender_emails:          senderEmails,
+        delete_existing:        deleteExisting,
+        delete_older_than_days: olderThanDays,
+        confirmed:              true,
       }),
     });
     const data = await res.json();

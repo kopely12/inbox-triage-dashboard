@@ -174,6 +174,8 @@ interface ConfirmState {
   action:          string;
   senders:         SenderRow[];
   deleteExisting?: boolean;
+  // null = delete all; number = only emails older than N days
+  olderThanDays?:  number | null;
 }
 
 function ConfirmModal({
@@ -182,12 +184,14 @@ function ConfirmModal({
   onConfirm,
   onClose,
   onToggleDeleteExisting,
+  onChangeOlderThanDays,
 }: {
-  state:                   ConfirmState;
-  isPending:               boolean;
-  onConfirm:               () => void;
-  onClose:                 () => void;
-  onToggleDeleteExisting?: (v: boolean) => void;
+  state:                    ConfirmState;
+  isPending:                boolean;
+  onConfirm:                () => void;
+  onClose:                  () => void;
+  onToggleDeleteExisting?:  (v: boolean) => void;
+  onChangeOlderThanDays?:   (v: number | null) => void;
 }) {
   const meta         = ACTION_META[state.action] ?? ACTION_META['ignore'];
   const totalEmails  = state.senders.reduce((s, r) => s + r.emails_received, 0);
@@ -242,7 +246,7 @@ function ConfirmModal({
         </DialogHeader>
 
         {/* "Also delete emails" checkbox — shown for unsubscribe actions */}
-        {(state.action === 'unsubscribe' || state.action === 'clean_never_engage') && onToggleDeleteExisting && (
+        {(state.action === 'unsubscribe') && onToggleDeleteExisting && (
           <label className="flex items-center gap-2 text-sm cursor-pointer mt-1">
             <input
               type="checkbox"
@@ -250,8 +254,49 @@ function ConfirmModal({
               onChange={(e) => onToggleDeleteExisting(e.target.checked)}
               className="rounded border-gray-300"
             />
-            <span>Also move all existing emails from {senderCount > 1 ? 'these senders' : 'this sender'} to trash</span>
+            <span>Also move existing emails from {senderCount > 1 ? 'these senders' : 'this sender'} to trash</span>
           </label>
+        )}
+
+        {/* Delete scope — shown for bulk_delete, clean_never_engage, or unsubscribe+deleteExisting */}
+        {onChangeOlderThanDays && (
+          (state.action === 'bulk_delete' ||
+           state.action === 'clean_never_engage' ||
+           (state.action === 'unsubscribe' && state.deleteExisting))
+        ) && (
+          <div className="mt-3 space-y-2">
+            <p className="text-sm font-medium">Which emails to delete:</p>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="radio"
+                name="delete-scope"
+                checked={state.olderThanDays !== null && state.olderThanDays !== undefined}
+                onChange={() => onChangeOlderThanDays(state.olderThanDays ?? 90)}
+                className="text-primary"
+              />
+              <span>Older than</span>
+              <input
+                type="number"
+                min={1}
+                max={3650}
+                value={state.olderThanDays ?? 90}
+                onChange={(e) => onChangeOlderThanDays(Math.max(1, parseInt(e.target.value) || 90))}
+                onClick={() => onChangeOlderThanDays(state.olderThanDays ?? 90)}
+                className="w-16 px-2 py-0.5 text-sm border border-border rounded text-center"
+              />
+              <span>days <span className="text-muted-foreground">(recommended)</span></span>
+            </label>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="radio"
+                name="delete-scope"
+                checked={state.olderThanDays === null}
+                onChange={() => onChangeOlderThanDays(null)}
+                className="text-primary"
+              />
+              <span>All emails from {senderCount > 1 ? 'these senders' : 'this sender'}</span>
+            </label>
+          </div>
         )}
 
         {/* Sender list (capped at 5) */}
@@ -405,10 +450,12 @@ export function SenderIntelligenceClient({
       return;
     }
     const needsConfirm = ['bulk_delete', 'unsubscribe', 'auto_archive', 'ignore', 'clean_never_engage'].includes(action);
+    // Default olderThanDays to 90 for any delete action
+    const defaultOlderThan = ['bulk_delete'].includes(action) ? 90 : null;
     if (needsConfirm) {
-      setConfirmState({ action, senders: targetSenders, deleteExisting });
+      setConfirmState({ action, senders: targetSenders, deleteExisting, olderThanDays: defaultOlderThan });
     } else {
-      executeAction(action, targetSenders, deleteExisting);
+      executeAction(action, targetSenders, deleteExisting, null);
     }
   }
 
@@ -424,20 +471,20 @@ export function SenderIntelligenceClient({
       });
       return;
     }
-    setConfirmState({ action: 'clean_never_engage', senders: neverSenders, deleteExisting: true });
+    setConfirmState({ action: 'clean_never_engage', senders: neverSenders, deleteExisting: true, olderThanDays: 90 });
   }
 
-  function executeAction(action: string, targetSenders: SenderRow[], deleteExisting = false) {
+  function executeAction(action: string, targetSenders: SenderRow[], deleteExisting = false, olderThanDays: number | null = null) {
     startTransition(async () => {
       let succeeded = 0, failed = 0;
 
       if (action === 'clean_never_engage') {
-        // Two sequential calls: unsubscribe those with headers, delete emails from all
+        // Two sequential calls: unsubscribe those with headers (+delete), delete rest
         const withHeaders    = targetSenders.filter((s) => s.has_unsubscribe_header);
         const withoutHeaders = targetSenders.filter((s) => !s.has_unsubscribe_header);
 
         if (withHeaders.length > 0) {
-          const r = await executeBulkAction('unsubscribe', withHeaders.map((s) => s.sender_email), true);
+          const r = await executeBulkAction('unsubscribe', withHeaders.map((s) => s.sender_email), true, olderThanDays);
           if (r.error && r.upgrade) {
             toast.error(r.error, { action: { label: 'Upgrade', onClick: () => router.push('/billing') } });
             return;
@@ -445,12 +492,12 @@ export function SenderIntelligenceClient({
           succeeded += r.succeeded; failed += r.failed;
         }
         if (withoutHeaders.length > 0) {
-          const r = await executeBulkAction('bulk_delete', withoutHeaders.map((s) => s.sender_email), false);
+          const r = await executeBulkAction('bulk_delete', withoutHeaders.map((s) => s.sender_email), false, olderThanDays);
           succeeded += r.succeeded; failed += r.failed;
         }
       } else {
         const emails = targetSenders.map((s) => s.sender_email);
-        const result = await executeBulkAction(action, emails, deleteExisting);
+        const result = await executeBulkAction(action, emails, deleteExisting, olderThanDays);
 
         if (result.error) {
           if (result.upgrade) {
@@ -796,9 +843,17 @@ export function SenderIntelligenceClient({
         <ConfirmModal
           state={confirmState}
           isPending={isPending}
-          onConfirm={() => executeAction(confirmState.action, confirmState.senders, confirmState.deleteExisting ?? false)}
+          onConfirm={() => executeAction(
+            confirmState.action,
+            confirmState.senders,
+            confirmState.deleteExisting ?? false,
+            confirmState.olderThanDays ?? null,
+          )}
           onClose={() => setConfirmState(null)}
-          onToggleDeleteExisting={(v) => setConfirmState((prev) => prev ? { ...prev, deleteExisting: v } : prev)}
+          onToggleDeleteExisting={(v) => setConfirmState((prev) =>
+            prev ? { ...prev, deleteExisting: v, olderThanDays: v ? (prev.olderThanDays ?? 90) : null } : prev
+          )}
+          onChangeOlderThanDays={(v) => setConfirmState((prev) => prev ? { ...prev, olderThanDays: v } : prev)}
         />
       )}
     </div>
