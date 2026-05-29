@@ -825,16 +825,22 @@ export function SenderIntelligenceClient({
 
       {/* Deep Clean */}
       {activeTab === 'deep_clean' && (
-        <DeepCleanPanel
-          onJobCreated={(job: CleanupJob) => {
-            setActiveJobId(job.id);
-            setActiveTab('jobs');
-          }}
-        />
+        <div className="flex-1 overflow-auto">
+          <DeepCleanPanel
+            onJobCreated={(job: CleanupJob) => {
+              setActiveJobId(job.id);
+              setActiveTab('jobs');
+            }}
+          />
+        </div>
       )}
 
       {/* Screener */}
-      {activeTab === 'screener' && <ScreenerTab />}
+      {activeTab === 'screener' && (
+        <div className="flex-1 overflow-hidden flex flex-col">
+          <ScreenerTab />
+        </div>
+      )}
 
       {/* Jobs */}
       {activeTab === 'jobs' && (
