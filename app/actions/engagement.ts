@@ -500,6 +500,151 @@ export async function trashEmail(messageId: string): Promise<{ success: boolean;
   }
 }
 
+// ── Inbox Health ─────────────────────────────────────────────────────────────
+
+export type InboxHealthComponent = {
+  score:  number;
+  max:    number;
+  label:  string;
+  detail: string;
+};
+
+export type InboxHealthRecommendation = {
+  priority: number;
+  label:    string;
+  action:   'senders' | 'deep_clean';
+  impact:   'high' | 'medium' | 'low';
+};
+
+export type InboxHealthData = {
+  score:       number | null;
+  grade:       string | null;     // A+, A, B, C, D, F
+  components:  Record<string, InboxHealthComponent> | null;
+  recommendations: InboxHealthRecommendation[];
+  trend:       Array<{ score: number; snapshot_date: string }>;
+  metadata: {
+    total_senders:       number;
+    noise_senders:       number;
+    acted_on:            number;
+    unsubscribeable:     number;
+    unsubscribed:        number;
+    days_since_action:   number;
+    unresolved_opt_outs: number;
+  };
+};
+
+function scoreToGrade(score: number): string {
+  if (score >= 90) return 'A+';
+  if (score >= 80) return 'A';
+  if (score >= 70) return 'B';
+  if (score >= 55) return 'C';
+  if (score >= 40) return 'D';
+  return 'F';
+}
+
+export async function getInboxHealth(): Promise<{ health: InboxHealthData | null; error?: string }> {
+  const { error, userId } = await requireUser();
+  if (error) return { health: null, error };
+
+  const [sendersRes, actionsRes, jobsRes, trendRes] = await Promise.all([
+    supabaseAdmin
+      .from('sender_engagement')
+      .select('category, has_unsubscribe_header, unsubscribe_status, auto_archive_enabled, ignored, opt_out_replied_at')
+      .eq('user_id', userId!),
+
+    supabaseAdmin
+      .from('sender_actions')
+      .select('created_at')
+      .eq('user_id', userId!)
+      .eq('status', 'completed')
+      .order('created_at', { ascending: false })
+      .limit(1),
+
+    supabaseAdmin
+      .from('cleanup_jobs')
+      .select('completed_at')
+      .eq('user_id', userId!)
+      .eq('status', 'completed')
+      .order('completed_at', { ascending: false })
+      .limit(1),
+
+    supabaseAdmin
+      .from('inbox_health_snapshots')
+      .select('score, snapshot_date')
+      .eq('user_id', userId!)
+      .order('snapshot_date', { ascending: true })
+      .limit(30),
+  ]);
+
+  const senders = sendersRes.data ?? [];
+  if (senders.length === 0) return { health: { score: null, grade: null, components: null, recommendations: [], trend: [], metadata: { total_senders: 0, noise_senders: 0, acted_on: 0, unsubscribeable: 0, unsubscribed: 0, days_since_action: 999, unresolved_opt_outs: 0 } } };
+
+  const totalSenders  = senders.length;
+  const noiseSenders  = senders.filter((s) => s.category === 'never_engage' || s.category === 'rarely_engage');
+  const noiseCount    = noiseSenders.length;
+
+  const actedOn = noiseSenders.filter((s) =>
+    s.unsubscribe_status === 'unsubscribed' || s.auto_archive_enabled || s.ignored,
+  ).length;
+
+  const unsubscribeable = noiseSenders.filter((s) => s.has_unsubscribe_header).length;
+  const unsubscribed    = noiseSenders.filter((s) =>
+    s.has_unsubscribe_header && s.unsubscribe_status === 'unsubscribed',
+  ).length;
+
+  const unresolvedOptOuts = noiseSenders.filter((s) =>
+    s.opt_out_replied_at && s.unsubscribe_status !== 'unsubscribed',
+  ).length;
+
+  const lastAction = actionsRes.data?.[0]?.created_at ?? jobsRes.data?.[0]?.completed_at ?? null;
+  const daysSince  = lastAction
+    ? (Date.now() - new Date(lastAction).getTime()) / 86_400_000
+    : 90;
+
+  // ── Component scores ──────────────────────────────────────────────────────
+  const noiseRatio        = totalSenders > 0 ? noiseCount / totalSenders : 0;
+  const noiseScore        = Math.round(25 * Math.max(0, 1 - noiseRatio * 1.5));
+  const cleanupScore      = noiseCount > 0 ? Math.round(25 * (actedOn / noiseCount)) : 25;
+  const subscriptionScore = unsubscribeable > 0 ? Math.round(20 * (unsubscribed / unsubscribeable)) : 20;
+  const recencyScore      = Math.round(15 * Math.max(0, 1 - daysSince / 60));
+  const replyDebtScore    = unresolvedOptOuts === 0
+    ? 15
+    : Math.round(15 * Math.max(0, 1 - unresolvedOptOuts / 5));
+
+  const score = Math.min(100, Math.max(0, noiseScore + cleanupScore + subscriptionScore + recencyScore + replyDebtScore));
+
+  const components: Record<string, InboxHealthComponent> = {
+    noise:        { score: noiseScore,        max: 25, label: 'Noise ratio',       detail: `${noiseCount} of ${totalSenders} senders are noise` },
+    cleanup:      { score: cleanupScore,      max: 25, label: 'Cleanup hygiene',   detail: `${actedOn} of ${noiseCount} noise senders actioned` },
+    subscription: { score: subscriptionScore, max: 20, label: 'Subscription debt', detail: `${unsubscribed} of ${unsubscribeable} unsubscribed` },
+    recency:      { score: recencyScore,      max: 15, label: 'Recent activity',   detail: lastAction ? `Last action ${Math.round(daysSince)}d ago` : 'No cleanup actions yet' },
+    reply_debt:   { score: replyDebtScore,    max: 15, label: 'Reply health',      detail: unresolvedOptOuts > 0 ? `${unresolvedOptOuts} opt-out replies unresolved` : 'All opt-outs resolved' },
+  };
+
+  // ── Recommendations ───────────────────────────────────────────────────────
+  const recs: InboxHealthRecommendation[] = [];
+  const canUnsub   = unsubscribeable - unsubscribed;
+  const unactedNoise = noiseCount - actedOn;
+
+  if (unresolvedOptOuts > 0) recs.push({ priority: 1, label: `Unsubscribe from ${unresolvedOptOuts} sender${unresolvedOptOuts > 1 ? 's' : ''} you asked to stop emailing you`, action: 'senders',    impact: 'high' });
+  if (canUnsub > 0)          recs.push({ priority: 2, label: `Unsubscribe from ${canUnsub} noise sender${canUnsub > 1 ? 's' : ''} with unsubscribe links`,                          action: 'senders',    impact: canUnsub > 5 ? 'high' : 'medium' });
+  if (unactedNoise > 3)      recs.push({ priority: 3, label: `Run a deep clean on ${unactedNoise} unactioned noise sender${unactedNoise > 1 ? 's' : ''}`,                           action: 'deep_clean', impact: unactedNoise > 10 ? 'high' : 'medium' });
+  if (daysSince > 30 && score < 80) recs.push({ priority: 4, label: `${Math.round(daysSince)} days since last cleanup — schedule a recurring clean`,                                action: 'deep_clean', impact: 'medium' });
+
+  const metadata = { total_senders: totalSenders, noise_senders: noiseCount, acted_on: actedOn, unsubscribeable, unsubscribed, days_since_action: Math.round(daysSince), unresolved_opt_outs: unresolvedOptOuts };
+
+  return {
+    health: {
+      score,
+      grade: scoreToGrade(score),
+      components,
+      recommendations: recs.sort((a, b) => a.priority - b.priority).slice(0, 3),
+      trend: (trendRes.data ?? []) as Array<{ score: number; snapshot_date: string }>,
+      metadata,
+    },
+  };
+}
+
 // ── Storage analysis ──────────────────────────────────────────────────────────
 
 export async function getStorageAnalysis(force = false): Promise<{ result?: StorageResult; error?: string }> {

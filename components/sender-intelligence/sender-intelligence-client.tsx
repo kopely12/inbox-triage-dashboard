@@ -58,6 +58,9 @@ export type SenderRow = {
   ignored:               boolean;
   period_days:           number;
   updated_at:            string | null;
+  emails_forwarded:      number;
+  engagement_score:      number | null;
+  opt_out_replied_at:    string | null;
 };
 
 export type Summary = {

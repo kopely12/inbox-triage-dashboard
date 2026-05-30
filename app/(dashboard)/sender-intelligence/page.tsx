@@ -44,7 +44,10 @@ export default async function SenderIntelligencePage() {
       auto_archive_filter_id,
       ignored,
       period_days,
-      updated_at
+      updated_at,
+      emails_forwarded,
+      engagement_score,
+      opt_out_replied_at
     `)
     .eq('user_id', userId)
     .eq('ignored', false)

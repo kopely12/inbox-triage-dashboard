@@ -9,6 +9,8 @@ import { Badge }   from '@/components/ui/badge';
 import { Button }  from '@/components/ui/button';
 import { MarkDoneButton }         from '@/components/commitments/commitment-row-actions';
 import { DismissWaitingButton }   from '@/components/overview/dismiss-waiting-button';
+import { InboxHealthCard }        from '@/components/overview/inbox-health-score';
+import { getInboxHealth }         from '@/app/actions/engagement';
 import {
   CheckSquare, AlertTriangle, ArrowUpRight,
   Inbox, ExternalLink, CalendarDays, Timer, Clock, Zap, TrendingUp,
@@ -97,7 +99,7 @@ export default async function OverviewPage() {
   const weekLabel = `${today.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}–${
     endOfWeek.toLocaleDateString('en-US', { day: 'numeric' })}`;
 
-  // ── Parallel DB fetches ───────────────────────────────────────────────────────
+  // ── Parallel fetches (DB + health score) ─────────────────────────────────────
   const [
     { data: lastSession },
     { count: openCount },
@@ -109,6 +111,7 @@ export default async function OverviewPage() {
     waitingItemsResult,
     { count: thisWeekCreatedCount },
     { count: lastWeekCreatedCount },
+    healthResult,
   ] = await Promise.all([
 
     // Last triage session
@@ -187,13 +190,17 @@ export default async function OverviewPage() {
       .eq('user_id', userId)
       .gte('scanned_at', startOfPriorWeekISO)
       .lt('scanned_at', startOfWeekISO),
+
+    // Inbox health score (computed from sender_engagement)
+    getInboxHealth(),
   ]);
 
-  const health          = extensionHealth(lastSession?.triggered_at ?? null);
+  const extensionStatus = extensionHealth(lastSession?.triggered_at ?? null);
   const waitingCount    = (waitingCountResult  as any)?.count ?? null;
   const waitingItems    = (waitingItemsResult  as any)?.data  ?? null;
   const thisWeekCreated = thisWeekCreatedCount ?? 0;
   const lastWeekCreated = lastWeekCreatedCount ?? 0;
+  const inboxHealth     = healthResult?.health ?? null;
   const wowDelta        = lastWeekCreated > 0
     ? Math.round(((thisWeekCreated - lastWeekCreated) / lastWeekCreated) * 100)
     : null;
@@ -295,9 +302,9 @@ export default async function OverviewPage() {
         </div>
         <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
           <Zap className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-          <Badge variant={health.variant} className="text-[10px] py-0">{health.label}</Badge>
-          <span className="text-xs text-muted-foreground hidden sm:inline">{health.detail}</span>
-          {health.variant === 'destructive' && (
+          <Badge variant={extensionStatus.variant} className="text-[10px] py-0">{extensionStatus.label}</Badge>
+          <span className="text-xs text-muted-foreground hidden sm:inline">{extensionStatus.detail}</span>
+          {extensionStatus.variant === 'destructive' && (
             <a
               href="https://mail.google.com/?inbox_triage_run=1"
               target="_blank" rel="noopener noreferrer"
@@ -308,6 +315,11 @@ export default async function OverviewPage() {
           )}
         </div>
       </div>
+
+      {/* Inbox Health Score */}
+      {inboxHealth && inboxHealth.score !== null && (
+        <InboxHealthCard health={inboxHealth} />
+      )}
 
       {/* Stat cards */}
       <div className="grid grid-cols-3 gap-4">
