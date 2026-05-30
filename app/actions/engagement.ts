@@ -353,6 +353,133 @@ export async function runDeepClean(
   }
 }
 
+// ── AI sender description ─────────────────────────────────────────────────────
+
+export async function describeSenders(
+  senderEmails: string[],
+): Promise<{ descriptions: Record<string, string | null>; error?: string }> {
+  const { error, userId } = await requireUser();
+  if (error) return { descriptions: {}, error };
+
+  try {
+    const res = await fetch(`${API_URL}/api/engagement/describe-sender`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'x-service-key': SERVICE_KEY },
+      body: JSON.stringify({ user_id: userId, sender_emails: senderEmails }),
+    });
+    const data = await res.json();
+    if (!res.ok) return { descriptions: {}, error: data.error };
+    return data;
+  } catch (err: unknown) {
+    return { descriptions: {}, error: err instanceof Error ? err.message : 'Request failed' };
+  }
+}
+
+// ── Safety scan before delete ─────────────────────────────────────────────────
+
+export type SafetyFinding = {
+  sender:   string;
+  subject:  string;
+  reason:   string;
+  severity: 'warning' | 'info';
+};
+
+export async function scanBeforeDelete(
+  senderEmails: string[],
+  olderThanDays: number | null,
+): Promise<{ findings: SafetyFinding[]; skipped?: boolean; error?: string }> {
+  const { error, userId } = await requireUser();
+  if (error) return { findings: [], error };
+
+  try {
+    const res = await fetch(`${API_URL}/api/engagement/scan-before-delete`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'x-service-key': SERVICE_KEY },
+      body: JSON.stringify({ user_id: userId, sender_emails: senderEmails, older_than_days: olderThanDays }),
+    });
+    const data = await res.json();
+    if (!res.ok) return { findings: [], error: data.error };
+    return data;
+  } catch (err: unknown) {
+    return { findings: [], error: err instanceof Error ? err.message : 'Request failed' };
+  }
+}
+
+// ── Noise briefing ────────────────────────────────────────────────────────────
+
+export type NoiseBriefing = {
+  generated_at:    string;
+  headline:        string;
+  summary:         string;
+  stats: {
+    recent_noise_senders: number;
+    recent_noise_emails:  number;
+    can_unsubscribe:      number;
+  };
+  top_senders: Array<{ email: string; name: string; category: string; emails: number; engagement: number }>;
+  proposed_action: string | null;
+};
+
+export async function getNoiseBriefing(): Promise<{ briefing: NoiseBriefing | null; error?: string }> {
+  const { error, userId } = await requireUser();
+  if (error) return { briefing: null, error };
+
+  const { data, error: dbError } = await supabaseAdmin
+    .from('users')
+    .select('preferences')
+    .eq('id', userId)
+    .single();
+
+  if (dbError) return { briefing: null, error: dbError.message };
+  return { briefing: data?.preferences?.engagement?.last_briefing ?? null };
+}
+
+// ── Cleanup schedule ──────────────────────────────────────────────────────────
+
+export type CleanupSchedule = {
+  enabled:         boolean;
+  frequency:       'daily' | 'weekly' | 'monthly';
+  day_of_week:     string;
+  categories:      string[];
+  older_than_days: number;
+  next_run_at:     string | null;
+  last_run_at:     string | null;
+};
+
+export async function getCleanupSchedule(): Promise<{ schedule: CleanupSchedule | null; error?: string }> {
+  const { error, userId } = await requireUser();
+  if (error) return { schedule: null, error };
+
+  const { data, error: dbError } = await supabaseAdmin
+    .from('users')
+    .select('preferences')
+    .eq('id', userId)
+    .single();
+
+  if (dbError) return { schedule: null, error: dbError.message };
+  return { schedule: data?.preferences?.engagement?.scheduled_cleanup ?? null };
+}
+
+export async function saveCleanupSchedule(
+  schedule: Partial<CleanupSchedule> & { enabled: boolean },
+): Promise<{ schedule: CleanupSchedule | null; error?: string }> {
+  const { error, userId } = await requireUser();
+  if (error) return { schedule: null, error };
+
+  try {
+    const res = await fetch(`${API_URL}/api/engagement/schedule`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'x-service-key': SERVICE_KEY },
+      body: JSON.stringify({ user_id: userId, ...schedule }),
+    });
+    const data = await res.json();
+    if (!res.ok) return { schedule: null, error: data.error };
+    return data;
+  } catch (err: unknown) {
+    return { schedule: null, error: err instanceof Error ? err.message : 'Request failed' };
+  }
+}
+
 // ── Trash single email ────────────────────────────────────────────────────────
 
 export async function trashEmail(messageId: string): Promise<{ success: boolean; error?: string }> {

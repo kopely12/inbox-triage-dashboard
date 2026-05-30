@@ -10,6 +10,8 @@ import { Zap, AlertTriangle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn }     from '@/lib/utils';
 import { estimateDeepClean, runDeepClean, type CleanupJob } from '@/app/actions/engagement';
+import { ScheduleSettings } from './schedule-settings';
+import { SafetyScanModal }  from './safety-scan-modal';
 
 const CATEGORY_OPTIONS = [
   { key: 'never_engage',  label: 'Never Open',   description: 'Senders you never open',           defaultOn: true,  safe: true  },
@@ -39,6 +41,7 @@ export function DeepCleanPanel({
   const [estimating,    setEstimating]    = useState(false);
   const [running,       setRunning]       = useState(false);
   const [showConfirm,   setShowConfirm]   = useState(false);
+  const [showScan,      setShowScan]      = useState(false);
 
   // Re-estimate whenever settings change
   const loadEstimate = useCallback(async () => {
@@ -212,7 +215,7 @@ export function DeepCleanPanel({
           <div className="flex gap-2">
             <Button
               variant="destructive"
-              onClick={handleRun}
+              onClick={() => setShowScan(true)}
               disabled={running}
               className="flex-1"
             >
@@ -224,6 +227,22 @@ export function DeepCleanPanel({
             </Button>
           </div>
         </div>
+      )}
+
+      {/* ── Schedule settings ─────────────────────────────────────────────── */}
+      <div className="max-w-2xl mx-auto px-6 pb-8">
+        <ScheduleSettings />
+      </div>
+
+      {/* ── Safety scan modal ──────────────────────────────────────────────── */}
+      {showScan && estimate && (
+        <SafetyScanModal
+          senderEmails={[]}   // deep clean resolves senders server-side; pass empty for now
+          olderThanDays={olderThanDays}
+          emailCount={estimate.estimated_emails}
+          onConfirm={() => { setShowScan(false); handleRun(); }}
+          onClose={() => setShowScan(false)}
+        />
       )}
     </div>
   );

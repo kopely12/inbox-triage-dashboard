@@ -25,14 +25,15 @@ import {
 import { cn } from '@/lib/utils';
 import {
   triggerRefresh, getEngagementStatus, executeBulkAction,
-  getActionHistory, undoAction, getSenderPreview,
+  getActionHistory, undoAction, getSenderPreview, describeSenders, getNoiseBriefing,
   type ActionResult, type ActionHistoryItem, type SenderPreview,
-  type CleanupJob,
+  type CleanupJob, type NoiseBriefing,
 } from '@/app/actions/engagement';
-import { StorageTab }     from './storage-tab';
-import { DeepCleanPanel } from './deep-clean-panel';
-import { ScreenerTab }    from './screener-tab';
+import { StorageTab }      from './storage-tab';
+import { DeepCleanPanel }  from './deep-clean-panel';
+import { ScreenerTab }     from './screener-tab';
 import { ActiveJobBanner, JobsPanel } from './jobs-panel';
+import { SafetyScanModal } from './safety-scan-modal';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -433,7 +434,36 @@ export function SenderIntelligenceClient({
   const [previewSender,    setPreviewSender]   = useState<SenderRow | null>(null);
   const [previewData,      setPreviewData]     = useState<SenderPreview | null>(null);
   const [previewLoading,   setPreviewLoading]  = useState(false);
+  const [aiDescriptions,   setAiDescriptions]  = useState<Record<string, string>>({});
+  const [briefing,         setBriefing]        = useState<NoiseBriefing | null>(null);
+  const [scanState,        setScanState]       = useState<{ senders: SenderRow[]; action: string; deleteExisting: boolean; olderThanDays: number | null } | null>(null);
   const isFree = planTier === 'free';
+
+  // ── Load briefing on mount ────────────────────────────────────────────────────
+
+  useEffect(() => {
+    getNoiseBriefing().then(({ briefing: b }) => { if (b) setBriefing(b); });
+  }, []);
+
+  // ── Lazy-load AI descriptions for visible senders ────────────────────────────
+
+  useEffect(() => {
+    if (activeTab !== 'senders' || !initialSenders.length) return;
+    const missing = initialSenders
+      .filter((s) => !aiDescriptions[s.sender_email])
+      .map((s) => s.sender_email)
+      .slice(0, 10); // batch of 10
+    if (!missing.length) return;
+    describeSenders(missing).then(({ descriptions }) => {
+      if (!descriptions) return;
+      // Strip null values before merging into state (Record<string,string> has no nulls)
+      const clean: Record<string, string> = {};
+      for (const [k, v] of Object.entries(descriptions)) {
+        if (v != null) clean[k] = v;
+      }
+      setAiDescriptions((prev) => ({ ...prev, ...clean }));
+    });
+  }, [activeTab, initialSenders]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Polling when running ─────────────────────────────────────────────────────
 
@@ -549,12 +579,35 @@ export function SenderIntelligenceClient({
       return;
     }
     const needsConfirm = ['bulk_delete', 'unsubscribe', 'auto_archive', 'ignore', 'clean_never_engage'].includes(action);
-    // Default olderThanDays to 90 for any delete action
     const defaultOlderThan = ['bulk_delete'].includes(action) ? 90 : null;
     if (needsConfirm) {
       setConfirmState({ action, senders: targetSenders, deleteExisting, olderThanDays: defaultOlderThan });
     } else {
       executeAction(action, targetSenders, deleteExisting, null);
+    }
+  }
+
+  // Called when the user clicks Confirm in ConfirmModal for a delete action —
+  // shows the safety scan before actually executing.
+  function handleConfirmWithScan() {
+    if (!confirmState) return;
+    const isDelete = confirmState.action === 'bulk_delete' || confirmState.action === 'clean_never_engage' ||
+      (confirmState.action === 'unsubscribe' && confirmState.deleteExisting);
+    if (isDelete && confirmState.senders.length > 1) {
+      setScanState({
+        senders:       confirmState.senders,
+        action:        confirmState.action,
+        deleteExisting: confirmState.deleteExisting ?? false,
+        olderThanDays:  confirmState.olderThanDays ?? null,
+      });
+      setConfirmState(null);
+    } else {
+      executeAction(
+        confirmState.action,
+        confirmState.senders,
+        confirmState.deleteExisting ?? false,
+        confirmState.olderThanDays ?? null,
+      );
     }
   }
 
@@ -874,6 +927,14 @@ export function SenderIntelligenceClient({
             </div>
           )}
 
+          {/* Weekly noise briefing card */}
+          {briefing && (
+            <NoiseBriefingCard
+              briefing={briefing}
+              onAction={() => setActiveTab('deep_clean')}
+            />
+          )}
+
           {/* Summary cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 px-6 py-4 shrink-0">
             <StatCard
@@ -1041,6 +1102,7 @@ export function SenderIntelligenceClient({
                       onAction={(action) => openConfirm(action, [sender])}
                       onPreview={() => handleOpenPreview(sender)}
                       isPending={isPending}
+                      aiDescription={aiDescriptions[sender.sender_email]}
                     />
                   ))
                 )}
@@ -1053,12 +1115,7 @@ export function SenderIntelligenceClient({
             <ConfirmModal
               state={confirmState}
               isPending={isPending}
-              onConfirm={() => executeAction(
-                confirmState.action,
-                confirmState.senders,
-                confirmState.deleteExisting ?? false,
-                confirmState.olderThanDays ?? null,
-              )}
+              onConfirm={handleConfirmWithScan}
               onClose={() => setConfirmState(null)}
               onToggleDeleteExisting={(v) => setConfirmState((prev) =>
                 prev ? { ...prev, deleteExisting: v, olderThanDays: v ? (prev.olderThanDays ?? 90) : null } : prev
@@ -1088,6 +1145,21 @@ export function SenderIntelligenceClient({
                 openConfirm(action, [previewSender]);
               }}
               onClose={() => { setPreviewSender(null); setPreviewData(null); }}
+            />
+          )}
+
+          {/* Safety scan modal (bulk delete with multiple senders) */}
+          {scanState && (
+            <SafetyScanModal
+              senderEmails={scanState.senders.map((s) => s.sender_email)}
+              olderThanDays={scanState.olderThanDays}
+              emailCount={scanState.senders.reduce((n, s) => n + s.emails_received, 0)}
+              onConfirm={() => {
+                const { senders, action, deleteExisting, olderThanDays } = scanState;
+                setScanState(null);
+                executeAction(action, senders, deleteExisting, olderThanDays);
+              }}
+              onClose={() => setScanState(null)}
             />
           )}
         </>
@@ -1471,6 +1543,67 @@ function PageHeader() {
   );
 }
 
+// ── NoiseBriefingCard ─────────────────────────────────────────────────────────
+
+function NoiseBriefingCard({
+  briefing,
+  onAction,
+}: {
+  briefing:  NoiseBriefing;
+  onAction:  () => void;
+}) {
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed) return null;
+
+  const age = briefing.generated_at ? formatRelative(briefing.generated_at) : null;
+
+  return (
+    <div className="mx-6 mt-4 rounded-lg border border-primary/20 bg-primary/5 p-4 shrink-0">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <Sparkles className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="text-sm font-semibold">{briefing.headline}</p>
+              {age && <span className="text-xs text-muted-foreground">{age}</span>}
+            </div>
+            <p className="text-sm text-muted-foreground mt-0.5">{briefing.summary}</p>
+            <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground flex-wrap">
+              <span>
+                <strong className="text-foreground">{briefing.stats.recent_noise_senders}</strong> noise senders
+              </span>
+              <span>
+                <strong className="text-foreground">{briefing.stats.recent_noise_emails.toLocaleString()}</strong> noise emails
+              </span>
+              {briefing.stats.can_unsubscribe > 0 && (
+                <span>
+                  <strong className="text-foreground">{briefing.stats.can_unsubscribe}</strong> can unsubscribe
+                </span>
+              )}
+            </div>
+            {briefing.proposed_action && (
+              <p className="text-xs text-muted-foreground mt-1.5 italic">{briefing.proposed_action}</p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button size="sm" onClick={onAction} className="h-7 text-xs">
+            <Zap className="w-3 h-3 mr-1.5" />
+            Clean Now
+          </Button>
+          <button
+            onClick={() => setDismissed(true)}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Dismiss briefing"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── SenderTableRow ─────────────────────────────────────────────────────────────
 
 function SenderTableRow({
@@ -1480,13 +1613,15 @@ function SenderTableRow({
   onAction,
   onPreview,
   isPending,
+  aiDescription,
 }: {
-  sender:     SenderRow;
-  isSelected: boolean;
-  onToggle:   () => void;
-  onAction:   (action: string) => void;
-  onPreview:  () => void;
-  isPending:  boolean;
+  sender:        SenderRow;
+  isSelected:    boolean;
+  onToggle:      () => void;
+  onAction:      (action: string) => void;
+  onPreview:     () => void;
+  isPending:     boolean;
+  aiDescription?: string;
 }) {
   const engRate = Math.round((sender.engagement_rate ?? 0) * 100);
 
@@ -1510,6 +1645,9 @@ function SenderTableRow({
           </span>
           {sender.sender_name && (
             <span className="text-xs text-muted-foreground truncate">{sender.sender_email}</span>
+          )}
+          {aiDescription && (
+            <span className="text-xs text-muted-foreground/70 italic truncate mt-0.5">{aiDescription}</span>
           )}
         </div>
         {/* Mobile-only: show category inline */}
