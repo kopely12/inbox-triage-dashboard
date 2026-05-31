@@ -20,6 +20,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Inbox,
+  Activity,
 } from 'lucide-react';
 import { Badge }  from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -46,7 +47,8 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/analytics',   label: 'Analytics',   icon: BarChart2,         adminOnly: false },
   { href: '/commitments', label: 'Commitments', icon: CheckSquare,       adminOnly: false },
   { href: '/senders',              label: 'Senders',             icon: SlidersHorizontal, adminOnly: false },
-  { href: '/sender-intelligence',  label: 'Sender Intelligence', icon: Inbox,             adminOnly: false },
+  { href: '/sender-intelligence',  label: 'Sender Intelligence', icon: Inbox,    adminOnly: false },
+  { href: '/inbox-health',         label: 'Inbox Health',        icon: Activity, adminOnly: false },
   {
     href: '/preferences', label: 'Preferences', icon: Settings2, adminOnly: false,
     subItems: [

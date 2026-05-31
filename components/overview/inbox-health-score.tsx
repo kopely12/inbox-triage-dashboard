@@ -1,18 +1,18 @@
 'use client';
 
 // InboxHealthScore — visual score ring + component breakdown + recommendations.
-// Used on the Overview (/) page to lead with inbox health as the primary metric.
+// Used on the Overview (/) page and exported sub-components for Sender Intelligence.
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { ArrowRight, Users, Info, X } from 'lucide-react';
+import { ArrowRight, Info, X, TrendingUp, TrendingDown, Minus, Zap, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { InboxHealthData } from '@/app/actions/engagement';
 
 // ── Info popover (fixed-positioned — safe inside grids/overflow:hidden) ────────
 
-function InfoPopover({ content }: { content: React.ReactNode }) {
+export function InfoPopover({ content }: { content: React.ReactNode }) {
   const [open, setOpen]   = useState(false);
   const [pos,  setPos]    = useState({ top: 0, left: 0 });
   const btnRef            = useRef<HTMLButtonElement>(null);
@@ -22,7 +22,6 @@ function InfoPopover({ content }: { content: React.ReactNode }) {
     e.stopPropagation();
     if (!open && btnRef.current) {
       const r = btnRef.current.getBoundingClientRect();
-      // Place below the icon, clamped so it never overflows the right edge
       setPos({
         top:  r.bottom + 6,
         left: Math.min(r.left - 4, window.innerWidth - 276),
@@ -31,7 +30,6 @@ function InfoPopover({ content }: { content: React.ReactNode }) {
     setOpen((v) => !v);
   }
 
-  // Close on outside click or Escape
   useEffect(() => {
     if (!open) return;
     function onMouse(e: MouseEvent) {
@@ -66,7 +64,6 @@ function InfoPopover({ content }: { content: React.ReactNode }) {
           style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 200 }}
           className="w-68 max-w-[272px] rounded-lg border border-border bg-card shadow-lg"
         >
-          {/* Close button */}
           <button
             onClick={() => setOpen(false)}
             className="absolute top-2 right-2 text-muted-foreground hover:text-foreground transition-colors"
@@ -84,8 +81,6 @@ function InfoPopover({ content }: { content: React.ReactNode }) {
 }
 
 // ── KPI explanations ──────────────────────────────────────────────────────────
-// Each entry describes what the metric measures, how points are earned, and
-// the single most effective action to improve it.
 
 const SCORE_INFO = (
   <>
@@ -162,7 +157,7 @@ const COMPONENT_INFO: Record<string, React.ReactNode> = {
   ),
 };
 
-// ── Score ring (SVG) ──────────────────────────────────────────────────────────
+// ── Score ring (animated entrance from 0 on mount) ────────────────────────────
 
 const RADIUS  = 52;
 const STROKE  = 8;
@@ -175,20 +170,37 @@ function scoreColor(score: number) {
 }
 
 function ScoreRing({ score }: { score: number }) {
-  const pct    = score / 100;
-  const offset = CIRCUMF * (1 - pct);
-  const col    = scoreColor(score);
+  const [animated, setAnimated] = useState(0);
+  const col = scoreColor(score);
+
+  // Animate the ring from 0 → score on mount using rAF
+  useEffect(() => {
+    const start    = performance.now();
+    const duration = 650;
+    function frame(now: number) {
+      const t     = Math.min((now - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - t, 3); // cubic ease-out
+      setAnimated(Math.round(eased * score));
+      if (t < 1) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }, [score]);
+
+  const offset = CIRCUMF * (1 - animated / 100);
 
   return (
-    <svg width="130" height="130" viewBox="0 0 130 130" className="shrink-0">
+    <svg width="130" height="130" viewBox="0 0 130 130" className="shrink-0"
+      aria-label={`Health score: ${score} out of 100`}>
+      {/* Track */}
       <circle cx="65" cy="65" r={RADIUS} fill="none" stroke="currentColor"
         strokeWidth={STROKE} className="text-muted/30" />
+      {/* Progress — driven by rAF counter, no CSS transition needed */}
       <circle cx="65" cy="65" r={RADIUS} fill="none" stroke={col.stroke}
         strokeWidth={STROKE} strokeLinecap="round"
         strokeDasharray={CIRCUMF} strokeDashoffset={offset}
         transform="rotate(-90 65 65)"
-        style={{ transition: 'stroke-dashoffset 0.6s ease' }}
       />
+      {/* Score number (shows actual score, not animated) */}
       <text x="65" y="60" textAnchor="middle" dominantBaseline="middle"
         className="fill-foreground" style={{ fontSize: 28, fontWeight: 700, fontFamily: 'inherit' }}>
         {score}
@@ -201,16 +213,43 @@ function ScoreRing({ score }: { score: number }) {
   );
 }
 
-// ── Component bar ─────────────────────────────────────────────────────────────
+// ── Delta badge ───────────────────────────────────────────────────────────────
+
+function DeltaBadge({ delta }: { delta: number | null }) {
+  if (delta === null) return null;
+  if (delta === 0) return (
+    <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground px-1.5 py-0.5 rounded-full border border-border/60">
+      <Minus className="w-2.5 h-2.5" /> No change
+    </span>
+  );
+  const up = delta > 0;
+  return (
+    <span className={cn(
+      'inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded-full border',
+      up ? 'text-green-700 bg-green-50 border-green-200' : 'text-red-700 bg-red-50 border-red-200',
+    )}>
+      {up ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
+      {up ? '+' : ''}{delta} pts
+    </span>
+  );
+}
+
+// ── Component bar (staggered animation via index prop) ────────────────────────
 
 function ComponentBar({
-  label, detail, score, max,
+  label, detail, score, max, index = 0,
 }: {
-  label: string; detail: string; score: number; max: number;
+  label: string; detail: string; score: number; max: number; index?: number;
 }) {
-  const pct = max > 0 ? (score / max) * 100 : 0;
-  const col = pct >= 70 ? 'bg-green-500' : pct >= 40 ? 'bg-amber-400' : 'bg-red-400';
+  const [width, setWidth] = useState(0);
+  const pct  = max > 0 ? (score / max) * 100 : 0;
+  const col  = pct >= 70 ? 'bg-green-500' : pct >= 40 ? 'bg-amber-400' : 'bg-red-400';
   const info = COMPONENT_INFO[label];
+
+  useEffect(() => {
+    const t = setTimeout(() => setWidth(pct), 60 + index * 80);
+    return () => clearTimeout(t);
+  }, [pct, index]);
 
   return (
     <div>
@@ -222,7 +261,8 @@ function ComponentBar({
         <span className="text-xs text-muted-foreground tabular-nums shrink-0">{score}/{max}</span>
       </div>
       <div className="h-1.5 rounded-full bg-muted/40 overflow-hidden">
-        <div className={cn('h-full rounded-full transition-all', col)} style={{ width: `${pct}%` }} />
+        <div className={cn('h-full rounded-full', col)}
+          style={{ width: `${width}%`, transition: 'width 0.55s cubic-bezier(0.4,0,0.2,1)' }} />
       </div>
       <p className="text-[11px] text-muted-foreground mt-0.5 leading-tight">{detail}</p>
     </div>
@@ -263,7 +303,7 @@ function TrendSparkline({ trend }: { trend: Array<{ score: number; snapshot_date
   );
 }
 
-// ── Shared header row (used in both variants) ─────────────────────────────────
+// ── Shared header row ─────────────────────────────────────────────────────────
 
 function HealthHeader({
   score, grade, metadata, trend,
@@ -273,16 +313,29 @@ function HealthHeader({
   metadata: InboxHealthData['metadata'];
   trend:    InboxHealthData['trend'];
 }) {
+  const [gradeVisible, setGradeVisible] = useState(false);
   const col = scoreColor(score);
+
+  // Grade badge entrance
+  useEffect(() => {
+    const t = setTimeout(() => setGradeVisible(true), 400);
+    return () => clearTimeout(t);
+  }, []);
+
   return (
     <div className="flex items-start gap-5 p-5 pb-4">
       <ScoreRing score={score} />
       <div className="flex-1 min-w-0 pt-1">
-        <div className="flex items-center gap-2 mb-0.5">
+        <div className="flex items-center gap-2 mb-0.5 flex-wrap">
           <h3 className="text-base font-semibold">Inbox Health</h3>
-          <span className={cn('text-xs font-bold px-1.5 py-0.5 rounded border', col.bg, col.text, col.border)}>
+          <span className={cn(
+            'text-xs font-bold px-1.5 py-0.5 rounded border transition-all duration-300',
+            col.bg, col.text, col.border,
+            gradeVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-75',
+          )}>
             {grade}
           </span>
+          <DeltaBadge delta={metadata.delta} />
           <InfoPopover content={SCORE_INFO} />
         </div>
         <p className="text-sm text-muted-foreground mb-3">
@@ -296,6 +349,9 @@ function HealthHeader({
           <span><strong className="text-foreground">{metadata.noise_senders}</strong> noise senders</span>
           <span><strong className="text-foreground">{metadata.unsubscribeable - metadata.unsubscribed}</strong> can unsubscribe</span>
           <span><strong className="text-foreground">{metadata.total_senders}</strong> total senders</span>
+          {metadata.streak >= 3 && (
+            <span className="text-amber-600">🏆 {metadata.streak}-day streak</span>
+          )}
         </div>
         {trend.length >= 2 && (
           <div className="mt-2">
@@ -307,13 +363,13 @@ function HealthHeader({
   );
 }
 
-// ── Component grid (shared) ───────────────────────────────────────────────────
+// ── Component grid (with staggered animation indices) ─────────────────────────
 
 function ComponentGrid({ components }: { components: NonNullable<InboxHealthData['components']> }) {
   return (
     <div className="px-5 pb-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-4 border-t border-border pt-4">
-      {Object.values(components).map((comp) => (
-        <ComponentBar key={comp.label} {...comp} />
+      {Object.values(components).map((comp, i) => (
+        <ComponentBar key={comp.label} {...comp} index={i} />
       ))}
     </div>
   );
@@ -352,7 +408,7 @@ export function InboxHealthScore({
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
             Top actions to improve your score
           </p>
-          {recommendations.map((rec, i) => (
+          {recommendations.slice(0, 3).map((rec, i) => (
             <button
               key={i}
               onClick={() => onNavigate(rec.action)}
@@ -364,6 +420,11 @@ export function InboxHealthScore({
                 rec.impact === 'medium' ? 'bg-amber-400' : 'bg-muted-foreground',
               )} />
               <span className="flex-1">{rec.label}</span>
+              {rec.points_gained > 0 && (
+                <span className="text-[11px] font-semibold text-primary/80 shrink-0 flex items-center gap-0.5">
+                  <Zap className="w-2.5 h-2.5" />+{rec.points_gained}
+                </span>
+              )}
               <ArrowRight className="w-3 h-3 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
             </button>
           ))}
@@ -387,10 +448,19 @@ export function InboxHealthCard({ health }: { health: InboxHealthData }) {
 
       {recommendations.length > 0 && (
         <div className="border-t border-border bg-muted/20 px-5 py-3 space-y-2">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Top actions to improve your score
-          </p>
-          {recommendations.map((rec, i) => (
+          <div className="flex items-center justify-between mb-0.5">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Top actions to improve your score
+            </p>
+            <Link
+              href="/inbox-health"
+              className="flex items-center gap-1 text-[11px] text-primary hover:underline"
+            >
+              Full report
+              <ExternalLink className="w-2.5 h-2.5" />
+            </Link>
+          </div>
+          {recommendations.slice(0, 3).map((rec, i) => (
             <Link
               key={i}
               href="/sender-intelligence"
@@ -402,6 +472,11 @@ export function InboxHealthCard({ health }: { health: InboxHealthData }) {
                 rec.impact === 'medium' ? 'bg-amber-400' : 'bg-muted-foreground',
               )} />
               <span className="flex-1">{rec.label}</span>
+              {rec.points_gained > 0 && (
+                <span className="text-[11px] font-semibold text-primary/80 shrink-0 flex items-center gap-0.5">
+                  <Zap className="w-2.5 h-2.5" />+{rec.points_gained}
+                </span>
+              )}
               <ArrowRight className="w-3 h-3 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
             </Link>
           ))}
