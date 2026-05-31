@@ -502,6 +502,15 @@ export async function trashEmail(messageId: string): Promise<{ success: boolean;
 
 // ── Inbox Health ─────────────────────────────────────────────────────────────
 
+export type PendingMilestone = {
+  type:         'grade' | 'streak';
+  grade?:       string;    // e.g. 'B', 'A', 'A+' (grade milestones)
+  streak?:      number;    // e.g. 7, 14, 30      (streak milestones)
+  score:        number;
+  message:      string;
+  achieved_at:  string;    // YYYY-MM-DD
+};
+
 export type InboxHealthComponent = {
   score:  number;
   max:    number;
@@ -824,4 +833,52 @@ export async function reviewScreenerBatch(
   } catch (err: unknown) {
     return { processed: 0, error: err instanceof Error ? err.message : 'Request failed' };
   }
+}
+
+// ── Milestone ─────────────────────────────────────────────────────────────────
+
+/** Returns the pending (unread) milestone for the current user, if any. */
+export async function getMilestone(): Promise<{ milestone: PendingMilestone | null }> {
+  const { error, userId } = await requireUser();
+  if (error) return { milestone: null };
+
+  const { data } = await supabaseAdmin
+    .from('users')
+    .select('preferences')
+    .eq('id', userId!)
+    .single();
+
+  const milestone = (data?.preferences?.engagement?.achievements?.pending_milestone ?? null) as PendingMilestone | null;
+  return { milestone };
+}
+
+/** Clears the pending milestone so it is not shown again. */
+export async function dismissMilestone(): Promise<{ success: boolean }> {
+  const { error, userId } = await requireUser();
+  if (error) return { success: false };
+
+  const { data } = await supabaseAdmin
+    .from('users')
+    .select('preferences')
+    .eq('id', userId!)
+    .single();
+
+  const prefs    = (data?.preferences as Record<string, unknown>) ?? {};
+  const engPrefs = (prefs.engagement  as Record<string, unknown>) ?? {};
+  const achieve  = (engPrefs.achievements as Record<string, unknown>) ?? {};
+
+  const updated = {
+    ...prefs,
+    engagement: {
+      ...engPrefs,
+      achievements: { ...achieve, pending_milestone: null },
+    },
+  };
+
+  await supabaseAdmin
+    .from('users')
+    .update({ preferences: updated })
+    .eq('id', userId!);
+
+  return { success: true };
 }

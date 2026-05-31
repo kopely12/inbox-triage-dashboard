@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils';
 import {
   triggerRefresh, getEngagementStatus, executeBulkAction,
   getActionHistory, undoAction, getSenderPreview, describeSenders, getNoiseBriefing,
+  getInboxHealth,
   type ActionResult, type ActionHistoryItem, type SenderPreview,
   type CleanupJob, type NoiseBriefing,
 } from '@/app/actions/engagement';
@@ -440,12 +441,19 @@ export function SenderIntelligenceClient({
   const [aiDescriptions,   setAiDescriptions]  = useState<Record<string, string>>({});
   const [briefing,         setBriefing]        = useState<NoiseBriefing | null>(null);
   const [scanState,        setScanState]       = useState<{ senders: SenderRow[]; action: string; deleteExisting: boolean; olderThanDays: number | null } | null>(null);
+  const [preActionScore,   setPreActionScore]  = useState<number | null>(null);
   const isFree = planTier === 'free';
 
-  // ── Load briefing on mount ────────────────────────────────────────────────────
+  // ── Load briefing + current health score on mount ────────────────────────────
 
   useEffect(() => {
     getNoiseBriefing().then(({ briefing: b }) => { if (b) setBriefing(b); });
+    // Fetch score silently so we can compare after a cleanup action
+    getInboxHealth().then(({ health }) => {
+      if (health?.score !== null && health?.score !== undefined) {
+        setPreActionScore(health.score);
+      }
+    });
   }, []);
 
   // ── Lazy-load AI descriptions for visible senders ────────────────────────────
@@ -673,6 +681,27 @@ export function SenderIntelligenceClient({
         : 'No changes made.';
       if (failed > 0) toast.warning(`${msg} ${failed} failed.`);
       else toast.success(msg);
+
+      // ── Post-cleanup health score celebration ─────────────────────────────
+      if (succeeded > 0 && preActionScore !== null) {
+        try {
+          const { health: newHealth } = await getInboxHealth();
+          const newScore = newHealth?.score;
+          if (newScore !== null && newScore !== undefined && newScore > preActionScore) {
+            const gain = newScore - preActionScore;
+            const emoji = gain >= 5 ? '🎉' : '✨';
+            const newGrade = newScore >= 90 ? 'A+' : newScore >= 80 ? 'A' : newScore >= 70 ? 'B' : newScore >= 55 ? 'C' : newScore >= 40 ? 'D' : 'F';
+            toast.success(`${emoji} Inbox Health improved!`, {
+              description: `${preActionScore} → ${newScore} pts (+${gain})  ·  Grade ${newGrade}`,
+              duration: 7000,
+              action: { label: 'View report', onClick: () => router.push('/inbox-health') },
+            });
+            setPreActionScore(newScore);
+          }
+        } catch {
+          // Non-critical — swallow silently
+        }
+      }
 
       router.refresh();
     });

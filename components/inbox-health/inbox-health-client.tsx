@@ -14,11 +14,12 @@ import {
 import { cn } from '@/lib/utils';
 import {
   TrendingUp, TrendingDown, Minus, ArrowRight,
-  Activity, Target, Zap, Calendar, Trophy,
-  BarChart3, CheckCircle2, AlertCircle,
+  Activity, Target, Zap, Trophy,
+  BarChart3, CheckCircle2, AlertTriangle, X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import type { InboxHealthData, InboxHealthTrendPoint } from '@/app/actions/engagement';
+import { getMilestone, dismissMilestone } from '@/app/actions/engagement';
+import type { InboxHealthData, InboxHealthTrendPoint, PendingMilestone } from '@/app/actions/engagement';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -514,7 +515,33 @@ function RecommendationsPanel({
 // ── Main client component ─────────────────────────────────────────────────────
 
 export function InboxHealthClient({ health }: { health: InboxHealthData | null }) {
-  const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [activeTab,      setActiveTab]      = useState<Tab>('overview');
+  const [milestone,      setMilestone]      = useState<PendingMilestone | null>(null);
+  const [alertDismissed, setAlertDismissed] = useState(false);
+
+  // Fetch pending milestone on mount
+  useEffect(() => {
+    getMilestone().then(({ milestone: m }) => { if (m) setMilestone(m); });
+  }, []);
+
+  // Restore score-drop alert dismissed state from localStorage
+  useEffect(() => {
+    const key = `ih-drop-${new Date().toISOString().slice(0, 7)}`; // keyed by month
+    if (typeof window !== 'undefined' && localStorage.getItem(key) === '1') {
+      setAlertDismissed(true);
+    }
+  }, []);
+
+  function handleDismissAlert() {
+    const key = `ih-drop-${new Date().toISOString().slice(0, 7)}`;
+    if (typeof window !== 'undefined') localStorage.setItem(key, '1');
+    setAlertDismissed(true);
+  }
+
+  async function handleDismissMilestone() {
+    await dismissMilestone();
+    setMilestone(null);
+  }
 
   if (!health || health.score === null || !health.components) {
     return (
@@ -541,8 +568,80 @@ export function InboxHealthClient({ health }: { health: InboxHealthData | null }
     { id: 'recommendations', label: 'Recommendations', icon: <Target className="w-4 h-4" />    },
   ];
 
+  const showDropAlert = !alertDismissed && metadata.delta !== null && metadata.delta <= -10;
+
   return (
+    <>
+    {/* ── Milestone celebration modal ── */}
+    {milestone && (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+           onClick={handleDismissMilestone}>
+        <div
+          className="bg-card rounded-2xl border border-border shadow-2xl p-8 max-w-sm w-full text-center space-y-5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="text-6xl leading-none select-none">
+            {milestone.type === 'grade' ? '🏆' : '🔥'}
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-1">
+              New Achievement Unlocked
+            </p>
+            <h2 className="text-xl font-bold leading-snug">{milestone.message}</h2>
+          </div>
+
+          {milestone.type === 'grade' && milestone.grade && (
+            <div className={cn(
+              'inline-flex items-center gap-2 text-2xl font-black px-6 py-2 rounded-xl border-2',
+              milestone.grade === 'A+' ? 'bg-green-50 text-green-700 border-green-300' :
+              milestone.grade === 'A'  ? 'bg-emerald-50 text-emerald-700 border-emerald-300' :
+                                         'bg-blue-50 text-blue-700 border-blue-300',
+            )}>
+              Grade {milestone.grade}
+            </div>
+          )}
+          {milestone.type === 'streak' && milestone.streak && (
+            <div className="inline-flex items-center gap-2 text-2xl font-black px-6 py-2 rounded-xl border-2 bg-amber-50 text-amber-700 border-amber-300">
+              🔥 {milestone.streak} days
+            </div>
+          )}
+
+          <p className="text-sm text-muted-foreground">
+            Score when achieved: <strong className="text-foreground">{milestone.score} / 100</strong>
+          </p>
+
+          <Button className="w-full" onClick={handleDismissMilestone}>
+            Awesome! 🎉
+          </Button>
+        </div>
+      </div>
+    )}
+
     <div className="max-w-5xl mx-auto space-y-6">
+      {/* ── Score drop alert ── */}
+      {showDropAlert && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/50 px-4 py-3 flex items-center gap-3">
+          <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+          <span className="text-sm text-amber-800 dark:text-amber-200 flex-1">
+            Your score dropped <strong>{Math.abs(metadata.delta!)} pts</strong> this week.
+            New noise senders may have appeared since your last analysis.
+          </span>
+          <button
+            onClick={() => setActiveTab('recommendations')}
+            className="text-xs font-medium text-amber-700 dark:text-amber-300 underline underline-offset-2 hover:no-underline shrink-0"
+          >
+            View fixes
+          </button>
+          <button
+            onClick={handleDismissAlert}
+            className="text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 transition-colors shrink-0"
+            aria-label="Dismiss"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* ── Page header ── */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
@@ -737,5 +836,6 @@ export function InboxHealthClient({ health }: { health: InboxHealthData | null }
         </div>
       )}
     </div>
+    </>
   );
 }
