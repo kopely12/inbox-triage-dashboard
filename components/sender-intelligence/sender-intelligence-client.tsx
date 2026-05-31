@@ -934,6 +934,9 @@ export function SenderIntelligenceClient({
           {briefing && (
             <NoiseBriefingCard
               briefing={briefing}
+              totalTrashed={initialSenders
+                .filter((s) => s.category === 'never_engage' || s.category === 'rarely_engage')
+                .reduce((n, s) => n + (s.emails_deleted || 0), 0)}
               onAction={() => setActiveTab('deep_clean')}
             />
           )}
@@ -1439,7 +1442,16 @@ function PreviewModal({
             <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border', categoryMeta.bg)}>
               {categoryMeta.label}
             </span>
-            <span>{sender.emails_received.toLocaleString()} emails · {Math.round((sender.engagement_rate ?? 0) * 100)}% open rate</span>
+            <span>
+              {sender.emails_received.toLocaleString()} emails
+              {' · '}{Math.round((sender.engagement_rate ?? 0) * 100)}% open rate
+              {(sender.emails_deleted ?? 0) > 0 && (
+                <span className="text-amber-600 dark:text-amber-500">
+                  {' · '}{sender.emails_deleted.toLocaleString()} trashed
+                  {' '}({Math.round(((sender.emails_deleted ?? 0) / (sender.emails_received || 1)) * 100)}%)
+                </span>
+              )}
+            </span>
           </DialogDescription>
         </DialogHeader>
 
@@ -1550,10 +1562,12 @@ function PageHeader() {
 
 function NoiseBriefingCard({
   briefing,
+  totalTrashed,
   onAction,
 }: {
-  briefing:  NoiseBriefing;
-  onAction:  () => void;
+  briefing:      NoiseBriefing;
+  totalTrashed?: number;
+  onAction:      () => void;
 }) {
   const [dismissed, setDismissed] = useState(false);
   if (dismissed) return null;
@@ -1581,6 +1595,12 @@ function NoiseBriefingCard({
               {briefing.stats.can_unsubscribe > 0 && (
                 <span>
                   <strong className="text-foreground">{briefing.stats.can_unsubscribe}</strong> can unsubscribe
+                </span>
+              )}
+              {(totalTrashed ?? 0) > 0 && (
+                <span className="flex items-center gap-1 text-amber-600 dark:text-amber-500">
+                  <Trash2 className="w-3 h-3" />
+                  <strong>{totalTrashed!.toLocaleString()}</strong> already trashed
                 </span>
               )}
             </div>
@@ -1626,7 +1646,17 @@ function SenderTableRow({
   isPending:     boolean;
   aiDescription?: string;
 }) {
-  const engRate = Math.round((sender.engagement_rate ?? 0) * 100);
+  const engRate    = Math.round((sender.engagement_rate ?? 0) * 100);
+  const deleted    = sender.emails_deleted ?? 0;
+  const received   = sender.emails_received || 1;
+  const deleteRate = deleted / received;
+  // Show trash count when ≥3 emails deleted and at least 20% delete rate
+  const showTrash  = deleted >= 3 && deleteRate >= 0.20;
+  const trashColor = deleteRate >= 0.60
+    ? 'text-red-500 dark:text-red-400'
+    : deleteRate >= 0.35
+      ? 'text-amber-500 dark:text-amber-400'
+      : 'text-muted-foreground';
 
   return (
     <tr className={cn('hover:bg-muted/30 transition-colors', isSelected && 'bg-primary/5')}>
@@ -1666,7 +1696,16 @@ function SenderTableRow({
 
       {/* Emails */}
       <td className="px-4 py-3 text-right tabular-nums hidden lg:table-cell">
-        {sender.emails_received.toLocaleString()}
+        <div className="flex flex-col items-end">
+          <span>{sender.emails_received.toLocaleString()}</span>
+          {showTrash && (
+            <span className={cn('flex items-center gap-0.5 text-xs tabular-nums', trashColor)}
+                  title={`${Math.round(deleteRate * 100)}% of emails trashed`}>
+              <Trash2 className="w-2.5 h-2.5" />
+              {deleted.toLocaleString()} trashed
+            </span>
+          )}
+        </div>
       </td>
 
       {/* Engagement */}
@@ -1700,6 +1739,16 @@ function SenderTableRow({
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700 border border-blue-200">
               <Archive className="w-3 h-3" />
               Auto-archived
+            </span>
+          )}
+          {/* High delete rate badge — strong unsubscribe signal */}
+          {deleteRate >= 0.50 && deleted >= 5 && sender.unsubscribe_status !== 'unsubscribed' && (
+            <span
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-700 border border-red-200"
+              title={`You've trashed ${Math.round(deleteRate * 100)}% of their emails — strong signal to unsubscribe`}
+            >
+              <Trash2 className="w-3 h-3" />
+              {Math.round(deleteRate * 100)}% trashed
             </span>
           )}
         </div>
