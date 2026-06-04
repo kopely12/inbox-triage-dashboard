@@ -1423,3 +1423,56 @@ export async function runAutoCleanNow(
     return { error: err instanceof Error ? err.message : 'Request failed' };
   }
 }
+
+// ── Homepage summary — lightweight data for the "What to do next" cards ───────
+
+export type HomepageSummary = {
+  refreshStatus:     string;
+  neverEngageCount:  number;
+  neverEngageEmails: number;
+  bundleableSenders: number;
+  autopilotEnabled:  boolean;
+  hasAnyRules:       boolean;
+};
+
+export async function getHomepageSummary(): Promise<HomepageSummary | null> {
+  const { error, userId } = await requireUser();
+  if (error || !userId) return null;
+
+  const [
+    { data: user },
+    { data: noiseSenders },
+    { data: bundleable },
+    { data: autopilotRules },
+  ] = await Promise.all([
+    supabaseAdmin.from('users')
+      .select('engagement_refresh_status')
+      .eq('id', userId)
+      .single(),
+
+    supabaseAdmin.from('sender_engagement')
+      .select('emails_received')
+      .eq('user_id', userId)
+      .eq('category', 'never_engage'),
+
+    supabaseAdmin.from('sender_engagement')
+      .select('sender_email')
+      .eq('user_id', userId)
+      .in('category', ['never_engage', 'rarely_engage'])
+      .eq('has_unsubscribe_header', true)
+      .or('unsubscribe_status.is.null,unsubscribe_status.neq.unsubscribed'),
+
+    supabaseAdmin.from('autopilot_rules')
+      .select('enabled')
+      .eq('user_id', userId),
+  ]);
+
+  return {
+    refreshStatus:     user?.engagement_refresh_status ?? 'never',
+    neverEngageCount:  noiseSenders?.length ?? 0,
+    neverEngageEmails: (noiseSenders ?? []).reduce((s, r) => s + (r.emails_received ?? 0), 0),
+    bundleableSenders: bundleable?.length ?? 0,
+    hasAnyRules:       (autopilotRules?.length ?? 0) > 0,
+    autopilotEnabled:  (autopilotRules ?? []).some((r) => r.enabled),
+  };
+}

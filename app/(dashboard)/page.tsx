@@ -1,9 +1,10 @@
 import { auth }            from '@/auth';
 import { supabaseAdmin }   from '@/lib/supabase';
 import { redirect }        from 'next/navigation';
-import { getInboxHealth }  from '@/app/actions/engagement';
+import { getInboxHealth, getHomepageSummary } from '@/app/actions/engagement';
 import { getProtectionAlerts } from '@/app/actions/protection';
 import { InboxHealthClient } from '@/components/inbox-health/inbox-health-client';
+import { WhatToDoNext }    from '@/components/inbox-health/what-to-do-next';
 
 export const metadata = { title: 'Inbox Health — Inbox Triage' };
 
@@ -51,6 +52,7 @@ export default async function HomePage() {
     { count: resolvedThisWeekCount },
     healthResult,
     alertsResult,
+    homepageSummary,
   ] = await Promise.all([
 
     // Last triage session — drives extension status
@@ -90,6 +92,9 @@ export default async function HomePage() {
 
     // Protection alerts
     getProtectionAlerts(),
+
+    // What to do next — action card data
+    getHomepageSummary(),
   ]);
 
   const ext = extensionHealthLabel(lastSession?.triggered_at ?? null);
@@ -104,10 +109,18 @@ export default async function HomePage() {
   };
 
   return (
-    <InboxHealthClient
-      health={healthResult.health}
-      commitmentSummary={commitmentSummary}
-      initialAlerts={alertsResult.alerts ?? []}
-    />
+    <div className="flex flex-col h-full overflow-auto">
+      {/* What to do next — always visible, above Inbox Health score */}
+      {homepageSummary && (
+        <div className="px-6 pt-6 pb-4 shrink-0 border-b border-border">
+          <WhatToDoNext summary={homepageSummary} />
+        </div>
+      )}
+      <InboxHealthClient
+        health={healthResult.health}
+        commitmentSummary={commitmentSummary}
+        initialAlerts={alertsResult.alerts ?? []}
+      />
+    </div>
   );
 }

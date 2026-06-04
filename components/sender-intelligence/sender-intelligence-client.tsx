@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useTransition, useMemo } from 'react';
+import { useState, useEffect, useCallback, useTransition, useMemo, useRef } from 'react';
 import { useRouter }        from 'next/navigation';
 import { toast }            from 'sonner';
 import {
@@ -599,6 +599,16 @@ export function SenderIntelligenceClient({
     } catch {}
   }, []);
 
+  // ── Auto-analyze on first visit — new users don't need to find the button ───
+
+  const autoAnalyzeFired = useRef(false);
+  useEffect(() => {
+    if (refreshStatus === 'never' && !autoAnalyzeFired.current) {
+      autoAnalyzeFired.current = true;
+      handleRefresh();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Load briefing + current health score on mount ────────────────────────────
 
   useEffect(() => {
@@ -635,9 +645,15 @@ export function SenderIntelligenceClient({
       const status = await getEngagementStatus();
       if (!status) return;
       if (status.refresh_status !== 'running') {
+        const wasFirstRun = noiseBaseline === null;
         setRefreshStatus(status.refresh_status);
         if (status.refresh_status === 'completed_with_errors') {
           toast.warning('Refresh completed with write errors — some sender data may be incomplete. Try refreshing again.');
+        } else if (status.refresh_status === 'completed' && wasFirstRun) {
+          toast.success('Inbox scanned — autopilot is now active to handle future noise.', {
+            duration: 6000,
+            description: 'We enabled a default rule that removes senders you consistently ignore.',
+          });
         }
         router.refresh();
       }
@@ -987,48 +1003,8 @@ export function SenderIntelligenceClient({
   // RENDER
   // ═══════════════════════════════════════════════════════════════════════════
 
-  // ── Never-initialized empty state ────────────────────────────────────────────
-  if (refreshStatus === 'never' && initialSenders.length === 0) {
-    return (
-      <div className="flex flex-col h-full">
-        <PageHeader />
-        <div className="flex flex-1 items-center justify-center">
-          <div className="text-center max-w-sm px-4">
-            <div className="flex justify-center mb-4">
-              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
-                <Inbox className="w-8 h-8 text-primary" />
-              </div>
-            </div>
-            <h2 className="text-lg font-semibold mb-2">Discover your inbox noise</h2>
-            <p className="text-muted-foreground text-sm mb-6">
-              Analyze the last {summary.period_days} days of email to see which senders you
-              actually engage with — and which ones are just noise. Takes about 90 seconds.
-            </p>
-            <Button onClick={handleRefresh} disabled={isRefreshing} size="lg">
-              {isRefreshing
-                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Starting…</>
-                : <><Inbox className="w-4 h-4 mr-2" /> Analyze Inbox Noise</>
-              }
-            </Button>
-            <p className="text-xs text-muted-foreground mt-4">
-              Already triaging in Gmail?{' '}
-              <a
-                href="https://mail.google.com"
-                target="_blank"
-                rel="noopener"
-                className="text-primary underline-offset-2 hover:underline"
-              >
-                Open Gmail →
-              </a>
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Initializing / running state (first run, no data yet) ────────────────────
-  if (refreshStatus === 'running' && initialSenders.length === 0) {
+  // ── First-run scanning state — auto-started, no data yet ────────────────────
+  if ((refreshStatus === 'never' || refreshStatus === 'running') && initialSenders.length === 0) {
     return (
       <div className="flex flex-col h-full">
         <PageHeader />
@@ -1039,10 +1015,22 @@ export function SenderIntelligenceClient({
                 <Loader2 className="w-8 h-8 text-primary animate-spin" />
               </div>
             </div>
-            <h2 className="text-lg font-semibold mb-2">Analyzing your inbox…</h2>
+            <h2 className="text-lg font-semibold mb-2">Scanning your inbox…</h2>
             <p className="text-muted-foreground text-sm">
-              We&apos;re scanning the last {summary.period_days} days of email.
-              This usually takes about 90 seconds. The page will update automatically.
+              We&apos;re analysing the last {summary.period_days} days of email to find senders
+              you never open, newsletters you could bundle, and noise you can clean up.
+              This takes about 90 seconds.
+            </p>
+            <p className="text-xs text-muted-foreground mt-6">
+              The page will update automatically — you can open Gmail in the meantime.{' '}
+              <a
+                href="https://mail.google.com"
+                target="_blank"
+                rel="noopener"
+                className="text-primary underline-offset-2 hover:underline"
+              >
+                Open Gmail →
+              </a>
             </p>
           </div>
         </div>
