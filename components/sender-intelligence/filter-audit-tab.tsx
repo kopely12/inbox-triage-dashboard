@@ -70,7 +70,7 @@ const ISSUE_META: Record<FilterIssueType, {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function FilterAuditTab() {
+export function FilterAuditTab({ embedded = false }: { embedded?: boolean }) {
   const [result,   setResult]   = useState<FilterAuditResult | null>(null);
   const [loading,  setLoading]  = useState(false);
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
@@ -114,30 +114,40 @@ export function FilterAuditTab() {
   );
 
   return (
-    <div className="flex-1 overflow-auto px-6 py-6">
-      <div className="max-w-2xl mx-auto space-y-6">
+    <div className={embedded ? 'px-6 pb-6 space-y-6' : 'flex-1 overflow-auto px-6 py-6'}>
+      <div className={cn('space-y-6', !embedded && 'max-w-2xl mx-auto')}>
 
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-base font-semibold flex items-center gap-2">
-              <Filter className="w-4 h-4 text-primary" />
-              Gmail Filter Audit
-            </h2>
-            <p className="text-sm text-muted-foreground mt-1">
-              Scans your Gmail filters for orphaned, duplicate, and dead rules that are cluttering your filter list.
-            </p>
+        {/* Header — suppressed when embedded (parent section provides its own heading) */}
+        {!embedded && (
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-base font-semibold flex items-center gap-2">
+                <Filter className="w-4 h-4 text-primary" />
+                Gmail Filter Audit
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Scans your Gmail filters for orphaned, duplicate, and dead rules that are cluttering your filter list.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={load}
+              disabled={loading}
+            >
+              <RefreshCw className={cn('w-3.5 h-3.5 mr-1.5', loading && 'animate-spin')} />
+              {result ? 'Re-scan' : 'Scan filters'}
+            </Button>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={load}
-            disabled={loading}
-          >
-            <RefreshCw className={cn('w-3.5 h-3.5 mr-1.5', loading && 'animate-spin')} />
-            {result ? 'Re-scan' : 'Scan filters'}
-          </Button>
-        </div>
+        )}
+        {embedded && (
+          <div className="flex justify-end">
+            <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+              <RefreshCw className={cn('w-3.5 h-3.5 mr-1.5', loading && 'animate-spin')} />
+              {result ? 'Re-scan' : 'Scan filters'}
+            </Button>
+          </div>
+        )}
 
         {/* Loading */}
         {loading && (

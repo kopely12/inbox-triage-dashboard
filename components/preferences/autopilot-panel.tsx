@@ -203,42 +203,40 @@ function RuleCard({
             </p>
           )}
 
-          {/* Preview impact — only when rule is disabled */}
-          {!state.enabled && (
-            <div className="mt-2.5">
-              <button
-                onClick={handlePreview}
-                disabled={previewLoading}
-                className="flex items-center gap-1.5 text-xs text-primary hover:underline disabled:opacity-50 disabled:no-underline"
-              >
-                {previewLoading ? (
-                  <>
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    Checking your senders…
-                  </>
-                ) : preview ? (
-                  <>
-                    <ChevronDown className={cn('w-3 h-3 transition-transform', previewOpen && 'rotate-180')} />
-                    {preview.total === 0
-                      ? 'No senders match yet'
-                      : `${preview.total} sender${preview.total !== 1 ? 's' : ''} would be affected`
-                    }
-                  </>
-                ) : (
-                  <>
-                    <Eye className="w-3 h-3" />
-                    Preview impact
-                  </>
-                )}
-              </button>
-
-              {previewOpen && preview && (
-                <div className="mt-1 border-l-2 border-primary/20 ml-1.5 pl-3">
-                  <PreviewPanel total={preview.total} senders={preview.senders} />
-                </div>
+          {/* Impact preview — pre-enable and live count when active */}
+          <div className="mt-2.5">
+            <button
+              onClick={handlePreview}
+              disabled={previewLoading}
+              className="flex items-center gap-1.5 text-xs text-primary hover:underline disabled:opacity-50 disabled:no-underline"
+            >
+              {previewLoading ? (
+                <>
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Checking your senders…
+                </>
+              ) : preview ? (
+                <>
+                  <ChevronDown className={cn('w-3 h-3 transition-transform', previewOpen && 'rotate-180')} />
+                  {preview.total === 0
+                    ? (state.enabled ? 'No senders currently match' : 'No senders match yet')
+                    : `${preview.total} sender${preview.total !== 1 ? 's' : ''} ${state.enabled ? 'currently affected' : 'would be affected'}`
+                  }
+                </>
+              ) : (
+                <>
+                  <Eye className="w-3 h-3" />
+                  {state.enabled ? 'Check current impact' : 'Preview impact'}
+                </>
               )}
-            </div>
-          )}
+            </button>
+
+            {previewOpen && preview && (
+              <div className="mt-1 border-l-2 border-primary/20 ml-1.5 pl-3">
+                <PreviewPanel total={preview.total} senders={preview.senders} />
+              </div>
+            )}
+          </div>
 
         </div>
 

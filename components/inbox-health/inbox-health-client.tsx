@@ -24,6 +24,7 @@ import type { InboxHealthData, InboxHealthTrendPoint, PendingMilestone } from '@
 import type { InboxAlert } from '@/app/actions/protection';
 import { InboxProtectionAlerts } from '@/components/inbox-health/inbox-protection-alerts';
 import { InfoPopover } from '@/components/overview/inbox-health-score';
+import { NoiseBriefingCard } from '@/components/inbox-health/noise-briefing-card';
 
 // ── CommitmentSummary — passed from the server page ───────────────────────────
 
@@ -1063,6 +1064,11 @@ export function InboxHealthClient({
         </div>
       </div>
 
+
+      {/* ── Weekly noise briefing ── */}
+      <div className="mb-4">
+        <NoiseBriefingCard />
+      </div>
 
       {/* ── Tab bar ── */}
       <div className="flex items-center border-b border-border">

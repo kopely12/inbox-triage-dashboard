@@ -202,11 +202,14 @@ export async function updateBundleDeliveryHour(hour: number): Promise<{ error?: 
 // ── Live bundle contents ──────────────────────────────────────────────────────
 
 export type BundleContents = {
-  enabled:      boolean;
-  emailCount:   number;
-  deliveryHour: number;
-  timezone:     string;
-  senders: { name: string; count: number; latestSubject: string }[];
+  enabled:        boolean;
+  paused:         boolean;
+  emailCount:     number;
+  deliveryHour:   number;
+  timezone:       string;
+  lastDigestAt:   string | null;
+  lastDigestCount: number | null;
+  senders: { name: string; email: string; count: number; latestSubject: string }[];
 };
 
 export async function getBundleContents(): Promise<{ contents?: BundleContents; error?: string }> {
@@ -225,16 +228,30 @@ export async function getBundleContents(): Promise<{ contents?: BundleContents; 
   }
 }
 
-export async function releaseBundleNow(): Promise<{ released?: number; error?: string }> {
+export async function releaseBundleNow(senderEmail?: string): Promise<{ released?: number; error?: string }> {
   const { userId, error } = await requireUser();
   if (error || !userId) return { error: error ?? 'Not authenticated' };
 
   try {
-    const data = await backendPost('/api/bundle/release', userId);
+    const body: Record<string, unknown> = {};
+    if (senderEmail) body.sender_email = senderEmail;
+    const data = await backendPost('/api/bundle/release', userId, body);
     revalidatePath('/sender-intelligence');
     return { released: data.released };
   } catch (err: unknown) {
     return { error: err instanceof Error ? err.message : 'Request failed' };
+  }
+}
+
+export async function setBundlePaused(paused: boolean): Promise<{ error?: string }> {
+  const { userId, error } = await requireUser();
+  if (error || !userId) return { error: error ?? 'Not authenticated' };
+
+  try {
+    await backendPost('/api/bundle/pause', userId, { paused });
+    return {};
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : 'Failed to update bundle' };
   }
 }
 

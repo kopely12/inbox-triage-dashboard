@@ -1,12 +1,11 @@
 'use client';
 
 // AutomationTab — Inbox Cleaner automation settings.
-// Combines Schedules, Autopilot rules, and Gmail Filter audit in one place.
-// Data is fetched client-side on mount so this tab is self-contained
-// (same pattern as ScreenerTab).
+// Combines Schedules, Autopilot rules, activity log, and Gmail Filter audit.
 
 import { useState, useEffect, useCallback, useTransition } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Calendar, Bot, Filter as FilterIcon, ChevronRight } from 'lucide-react';
+import { FilterAuditTab } from './filter-audit-tab';
 import { AutopilotPanel }  from '@/components/preferences/autopilot-panel';
 import { SchedulePanel }   from '@/components/preferences/schedule-panel';
 import { getAutopilotRules, getAutopilotEnabled, setAutopilotEnabled, getAutopilotActivity, type AutopilotActivityEntry } from '@/app/actions/autopilot';
@@ -72,8 +71,26 @@ export function AutomationTab() {
     <div className="flex-1 overflow-auto">
       <div className="max-w-2xl mx-auto space-y-0 divide-y divide-border">
 
+        {/* Section quick-jump nav */}
+        <div className="px-6 py-3 flex items-center gap-4 text-xs text-muted-foreground border-b border-border/60 bg-muted/20">
+          <span className="font-medium text-foreground">Jump to:</span>
+          {[
+            { id: 'schedules',  label: 'Schedules',  icon: Calendar    },
+            { id: 'autopilot',  label: 'Auto-pilot', icon: Bot         },
+            { id: 'filters',    label: 'Filters',    icon: FilterIcon  },
+          ].map(({ id, label, icon: Icon }) => (
+            <a key={id} href={`#auto-${id}`}
+              className="flex items-center gap-1 hover:text-foreground transition-colors"
+            >
+              <Icon className="w-3 h-3" />
+              {label}
+              <ChevronRight className="w-3 h-3 opacity-40" />
+            </a>
+          ))}
+        </div>
+
         {/* Schedules */}
-        <section className="px-6 py-6">
+        <section id="auto-schedules" className="px-6 py-6">
           <h2 className="text-sm font-semibold mb-0.5">Schedules</h2>
           <p className="text-xs text-muted-foreground mb-4">
             Automatically run inbox analysis and cleanup on a recurring schedule.
@@ -82,7 +99,7 @@ export function AutomationTab() {
         </section>
 
         {/* Autopilot */}
-        <section className="px-6 py-6">
+        <section id="auto-autopilot" className="px-6 py-6">
           <div className="flex items-start justify-between mb-0.5">
             <h2 className="text-sm font-semibold">Auto-pilot</h2>
             <button
@@ -145,6 +162,17 @@ export function AutomationTab() {
             </div>
           </section>
         )}
+
+        {/* Gmail filter audit */}
+        <section id="auto-filters" className="px-0 py-0">
+          <div className="px-6 pt-6 pb-2">
+            <h2 className="text-sm font-semibold mb-0.5">Gmail Filters</h2>
+            <p className="text-xs text-muted-foreground">
+              Audit and manage Gmail filters that affect your inbox — find orphaned, duplicate, or stale rules.
+            </p>
+          </div>
+          <FilterAuditTab embedded />
+        </section>
 
       </div>
     </div>

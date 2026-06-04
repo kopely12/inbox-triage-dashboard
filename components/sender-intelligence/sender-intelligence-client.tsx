@@ -545,7 +545,7 @@ export function SenderIntelligenceClient({
   const router = useRouter();
 
   // Top-level navigation
-  const [activeTab, setActiveTab] = useState<'senders' | 'storage' | 'deep_clean' | 'screener' | 'dormant' | 'bundle' | 'automation' | 'filters'>('senders');
+  const [activeTab, setActiveTab] = useState<'senders' | 'storage' | 'deep_clean' | 'screener' | 'dormant' | 'bundle' | 'automation'>('senders');
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   // Local state
@@ -573,6 +573,7 @@ export function SenderIntelligenceClient({
   const [previewData,      setPreviewData]     = useState<SenderPreview | null>(null);
   const [previewLoading,   setPreviewLoading]  = useState(false);
   const [aiDescriptions,   setAiDescriptions]  = useState<Record<string, string>>({});
+  const [descriptionsLoaded, setDescriptionsLoaded] = useState(false);
   const [briefing,         setBriefing]        = useState<NoiseBriefing | null>(null);
   const [scanState,        setScanState]       = useState<{ senders: SenderRow[]; action: string; deleteExisting: boolean; olderThanDays: number | null } | null>(null);
   const [preActionScore,   setPreActionScore]  = useState<number | null>(null);
@@ -610,25 +611,21 @@ export function SenderIntelligenceClient({
     });
   }, []);
 
-  // ── Lazy-load AI descriptions for visible senders ────────────────────────────
+  // ── On-demand AI descriptions — only fires when user requests them ───────────
 
-  useEffect(() => {
-    if (activeTab !== 'senders' || !initialSenders.length) return;
-    const missing = initialSenders
-      .filter((s) => !aiDescriptions[s.sender_email])
-      .map((s) => s.sender_email)
-      .slice(0, 10); // batch of 10
-    if (!missing.length) return;
-    describeSenders(missing).then(({ descriptions }) => {
+  const handleLoadDescriptions = useCallback(() => {
+    if (descriptionsLoaded || !initialSenders.length) return;
+    setDescriptionsLoaded(true);
+    const emails = initialSenders.map((s) => s.sender_email).slice(0, 50);
+    describeSenders(emails).then(({ descriptions }) => {
       if (!descriptions) return;
-      // Strip null values before merging into state (Record<string,string> has no nulls)
       const clean: Record<string, string> = {};
       for (const [k, v] of Object.entries(descriptions)) {
         if (v != null) clean[k] = v;
       }
       setAiDescriptions((prev) => ({ ...prev, ...clean }));
     });
-  }, [activeTab, initialSenders]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [descriptionsLoaded, initialSenders]);
 
   // ── Polling when running ─────────────────────────────────────────────────────
 
@@ -1058,13 +1055,12 @@ export function SenderIntelligenceClient({
   const stillSendingCount = optOutSenders.filter((s) => s.resolution === 'still_sending').length;
 
   const PRIMARY_TABS = [
-    { key: 'senders'    as const, label: 'Senders',    icon: Inbox,     badge: null         },
-    { key: 'deep_clean' as const, label: 'Deep Clean', icon: Zap,       badge: null         },
-    { key: 'screener'   as const, label: 'Screener',   icon: Shield,    badge: null         },
-    { key: 'bundle'     as const, label: 'Bundle',     icon: Package,         badge: null         },
-    { key: 'automation' as const, label: 'Automation', icon: SlidersHorizontal, badge: null       },
-    { key: 'filters'    as const, label: 'Filters',    icon: Filter,          badge: null         },
-    { key: 'storage'    as const, label: 'Storage',    icon: HardDrive,       badge: null         },
+    { key: 'senders'    as const, label: 'Senders',    icon: Inbox,             badge: null },
+    { key: 'deep_clean' as const, label: 'Deep Clean', icon: Zap,               badge: null },
+    { key: 'screener'   as const, label: 'Screener',   icon: Shield,            badge: null },
+    { key: 'bundle'     as const, label: 'Bundle',     icon: Package,           badge: null },
+    { key: 'automation' as const, label: 'Automation', icon: SlidersHorizontal, badge: null },
+    { key: 'storage'    as const, label: 'Storage',    icon: HardDrive,         badge: null },
   ];
 
   return (
@@ -1141,52 +1137,18 @@ export function SenderIntelligenceClient({
                 <Download className="w-4 h-4" />
               </Button>
             )}
-            {/* Type filter dropdown — only when type data is available */}
-            {Object.keys(typeStatsBySender).length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant={activeTypeFilter ? 'secondary' : 'ghost'}
-                    size="sm"
-                    className={cn('gap-1', activeTypeFilter && 'text-primary')}
-                  >
-                    <Filter className="w-3.5 h-3.5" />
-                    {activeTypeFilter && (
-                      <span className="text-xs">
-                        {TYPE_FILTERS.find((t) => t.key === activeTypeFilter)?.label ?? 'Type'}
-                      </span>
-                    )}
-                    <ChevronDown className="w-3 h-3 opacity-50" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-44">
-                  {activeTypeFilter && (
-                    <>
-                      <DropdownMenuItem onClick={() => setActiveTypeFilter(null)}>
-                        <X className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
-                        Clear filter
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                    </>
-                  )}
-                  {TYPE_FILTERS.map(({ key, label }) => {
-                    const count = Object.values(typeStatsBySender).filter((stats) =>
-                      stats.some((t) => t.email_type === key)
-                    ).length;
-                    if (count === 0) return null;
-                    return (
-                      <DropdownMenuItem
-                        key={key}
-                        onClick={() => setActiveTypeFilter(activeTypeFilter === key ? null : key)}
-                        className={cn(activeTypeFilter === key && 'bg-primary/5 text-primary font-medium')}
-                      >
-                        <span className="flex-1">{label}</span>
-                        <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
-                      </DropdownMenuItem>
-                    );
-                  })}
-                </DropdownMenuContent>
-              </DropdownMenu>
+            {/* AI descriptions — load on demand */}
+            {initialSenders.length > 0 && !descriptionsLoaded && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleLoadDescriptions}
+                title="Load AI-generated sender descriptions"
+                className="px-2 text-xs gap-1 text-muted-foreground"
+              >
+                <span className="text-base leading-none">🤖</span>
+                Describe
+              </Button>
             )}
 
             {activeCategory === 'dormant' && filteredSenders.length > 0 && (
@@ -1445,12 +1407,6 @@ export function SenderIntelligenceClient({
         </div>
       )}
 
-      {/* Filters */}
-      {activeTab === 'filters' && (
-        <div className="flex-1 overflow-hidden flex flex-col">
-          <FilterAuditTab />
-        </div>
-      )}
 
       {/* Opt-outs — rendered inside Senders tab when activeCategory === 'opt_outs' */}
       {activeTab === 'senders' && activeCategory === 'opt_outs' && (
@@ -1788,6 +1744,30 @@ export function SenderIntelligenceClient({
             userDomain={userDomain}
           />
 
+          {/* First-use "Start here" card — shown once before first cleanup */}
+          {noiseBaseline === null && summary.never_engage_count >= 5 && (
+            <div className="mx-6 mt-3 rounded-lg border border-amber-200 bg-amber-50/60 px-4 py-3 shrink-0 flex items-start gap-3">
+              <span className="text-lg leading-none shrink-0 mt-0.5">👋</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-amber-900">Start here</p>
+                <p className="text-xs text-amber-800 mt-0.5">
+                  You have <strong>{summary.never_engage_count}</strong> senders you never open,
+                  generating <strong>{summary.total_noise_emails.toLocaleString()}</strong> noise emails.
+                  {' '}Delete them in one pass to reclaim your inbox.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setActiveTab('deep_clean')}
+                className="shrink-0 h-7 text-xs border-amber-300 text-amber-900 hover:bg-amber-100"
+              >
+                <Zap className="w-3 h-3 mr-1" />
+                Deep Clean
+              </Button>
+            </div>
+          )}
+
           {/* New sender digest (screener) */}
           {screenerEnabled && screenerQueue.length > 0 && (
             <div className="px-6 pt-3">
@@ -1798,25 +1778,22 @@ export function SenderIntelligenceClient({
             </div>
           )}
 
-          {/* Weekly noise briefing card */}
-          {briefing && (
-            <NoiseBriefingCard
-              briefing={briefing}
-              totalTrashed={initialSenders
-                .filter((s) => s.category === 'never_engage' || s.category === 'rarely_engage')
-                .reduce((n, s) => n + (s.emails_deleted || 0), 0)}
-              onAction={() => setActiveTab('deep_clean')}
-            />
-          )}
 
-          {/* Secondary filter chips — only shown when they have matching senders */}
+          {/* Secondary filter chips — category cross-cuts + type filters */}
           {activeCategory !== 'opt_outs' && (() => {
             const SECONDARY_CATS = [
               { key: 'lapsed',           label: '📉 Lapsed'          },
               { key: 'still_receiving',  label: 'Still Receiving'     },
               { key: 'high_delete_rate', label: '🗑 High delete rate' },
             ];
-            if (!SECONDARY_CATS.some(({ key }) => categoryCount(key) > 0)) return null;
+            const typeChips = TYPE_FILTERS.map(({ key, label }) => ({
+              key, label,
+              count: Object.values(typeStatsBySender).filter((stats) =>
+                stats.some((t) => t.email_type === key)
+              ).length,
+            })).filter((t) => t.count > 0);
+            const hasCats  = SECONDARY_CATS.some(({ key }) => categoryCount(key) > 0);
+            if (!hasCats && typeChips.length === 0) return null;
             return (
               <div className="px-6 pb-2 shrink-0 flex gap-1 flex-wrap">
                 {SECONDARY_CATS.map(({ key, label }) => {
@@ -1836,6 +1813,30 @@ export function SenderIntelligenceClient({
                     >
                       {label}
                       <span className={cn('text-[10px] px-1 py-0.5 rounded-full', active ? 'bg-primary/20' : 'bg-muted')}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+                {/* Type filter pills — only shown when type intelligence data exists */}
+                {typeChips.length > 0 && SECONDARY_CATS.some(({ key }) => categoryCount(key) > 0) && (
+                  <span className="text-muted-foreground/30 self-center px-0.5">·</span>
+                )}
+                {typeChips.map(({ key, label, count }) => {
+                  const active = activeTypeFilter === key;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => setActiveTypeFilter(active ? null : key)}
+                      className={cn(
+                        'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border',
+                        active
+                          ? 'bg-secondary text-secondary-foreground border-secondary'
+                          : 'text-muted-foreground border-border hover:border-foreground/30 hover:text-foreground',
+                      )}
+                    >
+                      {label}
+                      <span className={cn('text-[10px] px-1 py-0.5 rounded-full', active ? 'bg-background/40' : 'bg-muted')}>
                         {count}
                       </span>
                     </button>

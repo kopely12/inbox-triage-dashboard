@@ -10,7 +10,6 @@ import { Zap, AlertTriangle, Loader2, ChevronDown, ChevronUp } from 'lucide-reac
 import { Button } from '@/components/ui/button';
 import { cn }     from '@/lib/utils';
 import { estimateDeepClean, runDeepClean, type CleanupJob } from '@/app/actions/engagement';
-import { ScheduleSettings } from './schedule-settings';
 import { SafetyScanModal }  from './safety-scan-modal';
 
 const CATEGORY_OPTIONS = [
@@ -284,10 +283,6 @@ export function DeepCleanPanel({
           )}
         </div>
 
-        {/* Schedule settings — visually separated inside the same card */}
-        <div className="border-t border-border px-4 py-4">
-          <ScheduleSettings />
-        </div>
       </div>
 
       {/* Safety scan modal */}
