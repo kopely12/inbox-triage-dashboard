@@ -519,6 +519,24 @@ export async function trashEmail(messageId: string): Promise<{ success: boolean;
   }
 }
 
+export async function untrashEmail(messageId: string): Promise<{ success: boolean; error?: string }> {
+  const { error, userId } = await requireUser();
+  if (error) return { success: false, error };
+
+  try {
+    const res = await fetch(`${API_URL}/api/engagement/emails/untrash`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'x-service-key': SERVICE_KEY },
+      body: JSON.stringify({ user_id: userId, message_id: messageId }),
+    });
+    const data = await res.json();
+    if (!res.ok) return { success: false, error: data.error };
+    return { success: true };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : 'Request failed' };
+  }
+}
+
 // ── Analysis schedule ─────────────────────────────────────────────────────────
 
 export type AnalysisSchedule = {
@@ -1030,6 +1048,37 @@ export async function reviewScreenerBatch(
   } catch (err: unknown) {
     return { processed: 0, error: err instanceof Error ? err.message : 'Request failed' };
   }
+}
+
+// ── Screener whitelist ────────────────────────────────────────────────────────
+
+export async function addDomainToWhitelist(domain: string): Promise<{ error?: string }> {
+  const { error, userId } = await requireUser();
+  if (error) return { error };
+
+  const { data } = await supabaseAdmin.from('users').select('preferences').eq('id', userId!).single();
+  const prefs     = data?.preferences ?? {};
+  const existing  = (prefs.screener_whitelist as string[]) ?? [];
+  if (existing.includes(domain)) return {};
+  const updated = { ...prefs, screener_whitelist: [...existing, domain] };
+  const { error: dbErr } = await supabaseAdmin.from('users').update({ preferences: updated }).eq('id', userId!);
+  if (dbErr) return { error: dbErr.message };
+  revalidatePath('/sender-intelligence');
+  return {};
+}
+
+export async function removeDomainFromWhitelist(domain: string): Promise<{ error?: string }> {
+  const { error, userId } = await requireUser();
+  if (error) return { error };
+
+  const { data } = await supabaseAdmin.from('users').select('preferences').eq('id', userId!).single();
+  const prefs    = data?.preferences ?? {};
+  const existing = (prefs.screener_whitelist as string[]) ?? [];
+  const updated  = { ...prefs, screener_whitelist: existing.filter((d) => d !== domain) };
+  const { error: dbErr } = await supabaseAdmin.from('users').update({ preferences: updated }).eq('id', userId!);
+  if (dbErr) return { error: dbErr.message };
+  revalidatePath('/sender-intelligence');
+  return {};
 }
 
 // ── Milestone ─────────────────────────────────────────────────────────────────

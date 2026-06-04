@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { HardDrive, RefreshCw, Loader2, Trash2, AlertTriangle, ExternalLink, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn }     from '@/lib/utils';
-import { getStorageAnalysis, trashEmail, executeBulkAction, type StorageResult, type StorageSender, type LargeEmail } from '@/app/actions/engagement';
+import { getStorageAnalysis, trashEmail, untrashEmail, executeBulkAction, type StorageResult, type StorageSender, type LargeEmail } from '@/app/actions/engagement';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -169,19 +169,21 @@ function SenderStorageTable({
     setRowState((prev) => new Map([...prev, [email, state]]));
   }
 
-  async function handleDelete(s: StorageSender) {
+  async function handleDelete(s: StorageSender, andUnsubscribe = false) {
     setState(s.sender_email, 'deleting');
-    const { succeeded, error } = await executeBulkAction('bulk_delete', [s.sender_email]);
-    if (error || succeeded === 0) {
+    const actions = [executeBulkAction('bulk_delete', [s.sender_email])];
+    if (andUnsubscribe) actions.push(executeBulkAction('unsubscribe', [s.sender_email]));
+    const results = await Promise.all(actions);
+    if (results[0].error || results[0].succeeded === 0) {
       toast.error(`Could not delete emails from ${s.sender_name || s.sender_email}`);
       setState(s.sender_email, 'idle');
       return;
     }
-    // Show green confirmation briefly, then fade the row out.
     setState(s.sender_email, 'deleted');
     setTimeout(() => {
       setRows((prev) => prev.filter((r) => r.sender_email !== s.sender_email));
     }, 1400);
+    if (andUnsubscribe) toast.success(`Emails deleted and unsubscribed from ${s.sender_name || s.sender_email}`);
   }
 
   if (!rows.length) {
@@ -235,24 +237,15 @@ function SenderStorageTable({
               </td>
               <td className="px-6 py-3">
                 {state === 'confirming' ? (
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">Delete all?</span>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      className="h-6 px-2 text-xs"
-                      onClick={() => handleDelete(s)}
-                    >
-                      Yes
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 px-2 text-xs"
-                      onClick={() => setState(s.sender_email, 'idle')}
-                    >
-                      No
-                    </Button>
+                  <div className="flex flex-col gap-1 items-end">
+                    <div className="flex items-center gap-1">
+                      <Button size="sm" variant="destructive" className="h-6 px-2 text-xs whitespace-nowrap"
+                        onClick={() => handleDelete(s)}>Delete emails</Button>
+                      <Button size="sm" variant="outline" className="h-6 px-2 text-xs whitespace-nowrap text-red-700 border-red-200 hover:bg-red-50"
+                        onClick={() => handleDelete(s, true)}>+ Unsubscribe</Button>
+                      <Button size="sm" variant="ghost" className="h-6 px-2 text-xs"
+                        onClick={() => setState(s.sender_email, 'idle')}>Cancel</Button>
+                    </div>
                   </div>
                 ) : state === 'deleting' ? (
                   <div className="flex items-center gap-1.5 text-muted-foreground">
@@ -287,6 +280,7 @@ function SenderStorageTable({
 function LargeEmailTable({ emails: initialEmails }: { emails: LargeEmail[] }) {
   const [emails,   setEmails]   = useState<LargeEmail[]>(initialEmails);
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   if (!emails.length) return (
     <div className="text-center py-12 text-muted-foreground text-sm">
@@ -303,55 +297,97 @@ function LargeEmailTable({ emails: initialEmails }: { emails: LargeEmail[] }) {
       return;
     }
     if (success) {
-      toast.success(`Moved "${email.subject || 'email'}" to trash.`);
       setEmails((prev) => prev.filter((e) => e.id !== email.id));
+      toast.success(`Moved to trash`, {
+        action: {
+          label: 'Undo',
+          onClick: async () => {
+            const { success: ok } = await untrashEmail(email.id);
+            if (ok) {
+              setEmails((prev) => [...prev, email].sort((a, b) => (b.size_bytes ?? 0) - (a.size_bytes ?? 0)));
+              toast.success('Restored to inbox');
+            }
+          },
+        },
+        duration: 6000,
+      });
     }
   }
 
+  async function handleBulkTrash() {
+    const ids = Array.from(selected);
+    setSelected(new Set());
+    setDeleting((prev) => { const next = new Set(prev); ids.forEach((id) => next.add(id)); return next; });
+    const results = await Promise.all(ids.map((id) => trashEmail(id)));
+    const succeeded = results.filter((r) => r.success).length;
+    const failed    = results.length - succeeded;
+    const trashed   = ids.filter((_, i) => results[i].success);
+    setEmails((prev) => prev.filter((e) => !trashed.includes(e.id)));
+    setDeleting(new Set());
+    if (failed > 0) toast.error(`${failed} emails could not be moved to trash`);
+    if (succeeded > 0) toast.success(`${succeeded} email${succeeded !== 1 ? 's' : ''} moved to trash`);
+  }
+
   return (
-    <table className="w-full text-sm">
-      <thead className="sticky top-0 bg-card border-b border-border z-10">
-        <tr>
-          <th className="px-6 py-3 text-left font-medium text-muted-foreground">Subject</th>
-          <th className="px-6 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">From</th>
-          <th className="px-6 py-3 text-right font-medium text-muted-foreground">Size</th>
-          <th className="px-6 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Date</th>
-          <th className="px-6 py-3 w-10" />
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-border">
-        {emails.map((e) => (
-          <tr key={e.id} className="hover:bg-muted/30 transition-colors">
-            <td className="px-6 py-3 max-w-sm">
-              <span className="font-medium line-clamp-1">{e.subject || '(no subject)'}</span>
-            </td>
-            <td className="px-6 py-3 text-muted-foreground hidden md:table-cell truncate max-w-[180px]">
-              {e.sender_name || e.sender_email}
-            </td>
-            <td className="px-6 py-3 text-right tabular-nums font-medium text-amber-700">
-              {e.size_mb} MB
-            </td>
-            <td className="px-6 py-3 text-muted-foreground hidden lg:table-cell">
-              {e.date_ts ? new Date(e.date_ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
-            </td>
-            <td className="px-6 py-3">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                onClick={() => handleTrash(e)}
-                disabled={deleting.has(e.id)}
-                title="Move to trash"
-              >
-                {deleting.has(e.id)
-                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  : <Trash2 className="w-3.5 h-3.5" />
-                }
-              </Button>
-            </td>
+    <div>
+      {selected.size > 0 && (
+        <div className="flex items-center gap-2 px-6 py-2.5 bg-primary/5 border-b border-primary/20">
+          <span className="text-sm font-medium text-primary">{selected.size} selected</span>
+          <Button size="sm" variant="destructive" className="h-7 text-xs ml-auto" onClick={handleBulkTrash}>
+            <Trash2 className="w-3 h-3 mr-1.5" /> Delete {selected.size}
+          </Button>
+          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelected(new Set())}>Clear</Button>
+        </div>
+      )}
+      <table className="w-full text-sm">
+        <thead className="sticky top-0 bg-card border-b border-border z-10">
+          <tr>
+            <th className="px-4 py-3 w-10">
+              <input type="checkbox"
+                checked={selected.size === emails.length && emails.length > 0}
+                onChange={() => setSelected(selected.size === emails.length ? new Set() : new Set(emails.map((e) => e.id)))}
+                className="rounded border-gray-300 cursor-pointer"
+              />
+            </th>
+            <th className="px-4 py-3 text-left font-medium text-muted-foreground">Subject</th>
+            <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">From</th>
+            <th className="px-4 py-3 text-right font-medium text-muted-foreground">Size</th>
+            <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Date</th>
+            <th className="px-4 py-3 w-10" />
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {emails.map((e) => (
+            <tr key={e.id} className={cn('hover:bg-muted/30 transition-colors', selected.has(e.id) && 'bg-primary/5')}>
+              <td className="px-4 py-3 w-10">
+                <input type="checkbox"
+                  checked={selected.has(e.id)}
+                  onChange={() => setSelected((prev) => { const next = new Set(prev); next.has(e.id) ? next.delete(e.id) : next.add(e.id); return next; })}
+                  className="rounded border-gray-300 cursor-pointer"
+                />
+              </td>
+              <td className="px-4 py-3 max-w-sm">
+                <span className="font-medium line-clamp-1">{e.subject || '(no subject)'}</span>
+              </td>
+              <td className="px-4 py-3 text-muted-foreground hidden md:table-cell truncate max-w-[180px]">
+                {e.sender_name || e.sender_email}
+              </td>
+              <td className="px-4 py-3 text-right tabular-nums font-medium text-amber-700">
+                {e.size_mb} MB
+              </td>
+              <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">
+                {e.date_ts ? new Date(e.date_ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+              </td>
+              <td className="px-4 py-3">
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                  onClick={() => handleTrash(e)} disabled={deleting.has(e.id)} title="Move to trash">
+                  {deleting.has(e.id) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

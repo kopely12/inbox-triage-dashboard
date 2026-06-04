@@ -8,13 +8,13 @@ import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import {
   Shield, ShieldCheck, ShieldOff, Loader2, RefreshCw, Check, X, AlertTriangle, Info,
-  ShieldAlert, ShieldQuestion,
+  ShieldAlert, ShieldQuestion, Plus, Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn }     from '@/lib/utils';
 import {
   enableScreener, disableScreener, getScreenerQueue, reviewScreenerBatch,
-  triggerScreenerScan,
+  triggerScreenerScan, addDomainToWhitelist, removeDomainFromWhitelist,
   type ScreenerSender, type TrustSignals, type ScreenerStats,
 } from '@/app/actions/engagement';
 
@@ -30,7 +30,10 @@ export function ScreenerTab() {
   const [toggling, setToggling] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [reviewing, setReviewing] = useState(false);
+  const [reviewing,       setReviewing]       = useState(false);
+  const [showWhitelist,   setShowWhitelist]   = useState(false);
+  const [newDomain,       setNewDomain]       = useState('');
+  const [whitelistBusy,   setWhitelistBusy]   = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -48,8 +51,54 @@ export function ScreenerTab() {
     const { error } = await triggerScreenerScan();
     setScanning(false);
     if (error) { toast.error(error); return; }
-    toast.success('Scan complete — queue updated.');
-    load();
+    // Auto-block high-risk senders after scan
+    await load();
+    setQueue((prev) => {
+      const highRisk = prev.filter((s) =>
+        s.lookalike_of ||
+        s.trust_signals?.spf === 'fail' ||
+        s.trust_signals?.dkim === 'fail',
+      );
+      if (highRisk.length > 0) {
+        handleReview(highRisk.map((s) => s.sender_email), 'blocked');
+        toast.success(`Scan complete — ${highRisk.length} high-risk sender${highRisk.length !== 1 ? 's' : ''} auto-blocked.`);
+      } else {
+        toast.success('Scan complete — queue updated.');
+      }
+      return prev;
+    });
+  }
+
+  async function handleApproveAndWhitelist(sender: ScreenerSender) {
+    const domain = sender.sender_domain ?? sender.sender_email.split('@')[1];
+    if (!domain) { await handleReview([sender.sender_email], 'approved'); return; }
+    setWhitelistBusy(true);
+    await Promise.all([
+      handleReview([sender.sender_email], 'approved'),
+      addDomainToWhitelist(domain),
+    ]);
+    setWhitelistBusy(false);
+    setSettings((s) => ({ ...s, whitelist: [...s.whitelist, domain] }));
+    toast.success(`Approved and whitelisted @${domain} — future senders from this domain skip the screener.`);
+  }
+
+  async function handleAddWhitelistDomain() {
+    const d = newDomain.trim().replace(/^@/, '').toLowerCase();
+    if (!d) return;
+    setWhitelistBusy(true);
+    const { error } = await addDomainToWhitelist(d);
+    setWhitelistBusy(false);
+    if (error) { toast.error(error); return; }
+    setSettings((s) => ({ ...s, whitelist: [...s.whitelist, d] }));
+    setNewDomain('');
+  }
+
+  async function handleRemoveWhitelistDomain(domain: string) {
+    setWhitelistBusy(true);
+    const { error } = await removeDomainFromWhitelist(domain);
+    setWhitelistBusy(false);
+    if (error) { toast.error(error); return; }
+    setSettings((s) => ({ ...s, whitelist: s.whitelist.filter((d) => d !== domain) }));
   }
 
   useEffect(() => { load(); }, [load]);
@@ -151,16 +200,27 @@ export function ScreenerTab() {
         </div>
         <div className="flex items-center gap-2">
           {settings.enabled && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleScanNow}
-              disabled={scanning || loading}
-              title="Scan your inbox now for new senders"
-            >
-              <RefreshCw className={cn('w-3.5 h-3.5 mr-1.5', scanning && 'animate-spin')} />
-              {scanning ? 'Scanning…' : 'Scan now'}
-            </Button>
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowWhitelist((v) => !v)}
+                title="Manage whitelisted domains"
+              >
+                <Shield className="w-3.5 h-3.5 mr-1.5" />
+                Whitelist{settings.whitelist.length > 0 ? ` (${settings.whitelist.length})` : ''}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleScanNow}
+                disabled={scanning || loading}
+                title="Scan your inbox now for new senders"
+              >
+                <RefreshCw className={cn('w-3.5 h-3.5 mr-1.5', scanning && 'animate-spin')} />
+                {scanning ? 'Scanning…' : 'Scan now'}
+              </Button>
+            </>
           )}
           <Button
             variant={settings.enabled ? 'outline' : 'default'}
@@ -186,6 +246,48 @@ export function ScreenerTab() {
           <span><strong className="text-red-600 tabular-nums">{stats.blocked}</strong> blocked</span>
           {stats.pending > 0 && (
             <span><strong className="text-amber-600 tabular-nums">{stats.pending}</strong> pending review</span>
+          )}
+        </div>
+      )}
+
+      {/* Domain whitelist panel */}
+      {settings.enabled && showWhitelist && (
+        <div className="px-6 py-4 border-b border-border bg-muted/20 shrink-0">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-medium">Whitelisted Domains</p>
+            <button onClick={() => setShowWhitelist(false)} className="text-xs text-muted-foreground hover:text-foreground">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground mb-3">
+            Senders from whitelisted domains bypass the screener and go straight to your inbox.
+          </p>
+          <div className="flex gap-2 mb-3">
+            <input
+              type="text"
+              value={newDomain}
+              onChange={(e) => setNewDomain(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleAddWhitelistDomain()}
+              placeholder="example.com"
+              className="flex-1 h-8 rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+            <Button size="sm" onClick={handleAddWhitelistDomain} disabled={whitelistBusy || !newDomain.trim()} className="h-8">
+              <Plus className="w-3.5 h-3.5 mr-1" />Add
+            </Button>
+          </div>
+          {settings.whitelist.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No whitelisted domains yet.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {settings.whitelist.map((domain) => (
+                <span key={domain} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-muted border border-border">
+                  @{domain}
+                  <button onClick={() => handleRemoveWhitelistDomain(domain)} className="text-muted-foreground hover:text-destructive">
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
           )}
         </div>
       )}
@@ -324,8 +426,9 @@ export function ScreenerTab() {
                       isSelected={selected.has(sender.sender_email)}
                       onToggle={() => toggleRow(sender.sender_email)}
                       onApprove={() => handleReview([sender.sender_email], 'approved')}
+                      onApproveAndWhitelist={() => handleApproveAndWhitelist(sender)}
                       onBlock={() => handleReview([sender.sender_email], 'blocked')}
-                      reviewing={reviewing}
+                      reviewing={reviewing || whitelistBusy}
                     />
                   ))}
                 </tbody>
@@ -400,14 +503,15 @@ function TrustBadges({ signals, lookalikeOf }: { signals: TrustSignals | null; l
 // ── ScreenerRow ───────────────────────────────────────────────────────────────
 
 function ScreenerRow({
-  sender, isSelected, onToggle, onApprove, onBlock, reviewing,
+  sender, isSelected, onToggle, onApprove, onApproveAndWhitelist, onBlock, reviewing,
 }: {
-  sender:     ScreenerSender;
-  isSelected: boolean;
-  onToggle:   () => void;
-  onApprove:  () => void;
-  onBlock:    () => void;
-  reviewing:  boolean;
+  sender:                 ScreenerSender;
+  isSelected:             boolean;
+  onToggle:               () => void;
+  onApprove:              () => void;
+  onApproveAndWhitelist:  () => void;
+  onBlock:                () => void;
+  reviewing:              boolean;
 }) {
   const isRisky = !!sender.lookalike_of ||
     (sender.trust_signals?.spf === 'fail' || sender.trust_signals?.dkim === 'fail');
@@ -462,6 +566,19 @@ function ScreenerRow({
             <Check className="w-3 h-3 mr-1" />
             Approve
           </Button>
+          {sender.sender_domain && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs text-green-700 hover:text-green-800 hover:bg-green-50 border border-green-200"
+              onClick={onApproveAndWhitelist}
+              disabled={reviewing}
+              title={`Approve and whitelist @${sender.sender_domain}`}
+            >
+              <ShieldCheck className="w-3 h-3 mr-1" />
+              + Whitelist
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"
