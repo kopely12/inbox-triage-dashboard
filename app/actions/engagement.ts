@@ -115,13 +115,17 @@ export type ActionHistoryItem = {
 
 // ── Email preview ─────────────────────────────────────────────────────────────
 
-export type SenderPreview = {
-  subject:  string | null;
-  from:     string | null;
-  date:     string | null;
-  snippet:  string | null;
-  date_ts:  number | null;
-  total:    string | number;
+export type PreviewEmail = {
+  subject: string | null;
+  from:    string | null;
+  date:    string | null;
+  snippet: string | null;
+  date_ts: number | null;
+};
+
+export type SenderPreview = PreviewEmail & {
+  total?:  string | number;
+  emails?: PreviewEmail[];
 };
 
 export async function getSenderPreview(senderEmail: string): Promise<{ preview: SenderPreview | null; error?: string }> {
@@ -142,7 +146,12 @@ export async function getSenderPreview(senderEmail: string): Promise<{ preview: 
     );
     const data = await res.json();
     if (!res.ok) return { preview: null, error: data.error };
-    return data;
+    // Embed the emails array into the preview object so the modal
+    // has access to all fetched emails for navigation.
+    const preview: SenderPreview | null = data.preview
+      ? { ...data.preview, emails: data.emails ?? [data.preview] }
+      : null;
+    return { preview };
   } catch (err: unknown) {
     return { preview: null, error: err instanceof Error ? err.message : 'Request failed' };
   }
@@ -235,6 +244,13 @@ export type StorageResult = {
   from_cache:         boolean;
 };
 
+export type TrustSignals = {
+  spf:              'pass' | 'fail' | 'neutral' | 'unknown';
+  dkim:             'pass' | 'fail' | 'unknown';
+  dmarc:            'pass' | 'fail' | 'unknown';
+  has_list_headers: boolean;
+};
+
 export type ScreenerSender = {
   id:              string;
   sender_email:    string;
@@ -245,6 +261,8 @@ export type ScreenerSender = {
   first_email_date: string | null;
   status:          string;
   created_at:      string;
+  trust_signals:   TrustSignals | null;
+  lookalike_of:    string | null;
 };
 
 // ── Async jobs ────────────────────────────────────────────────────────────────
@@ -314,9 +332,9 @@ export async function getJob(jobId: string): Promise<{ job?: CleanupJob; error?:
 export async function estimateDeepClean(
   categories: string[],
   olderThanDays: number | null,
-): Promise<{ senders: number; estimated_emails: number; error?: string }> {
+): Promise<{ senders: number; estimated_emails: number; sender_emails: string[]; error?: string }> {
   const { error, userId } = await requireUser();
-  if (error) return { senders: 0, estimated_emails: 0, error };
+  if (error) return { senders: 0, estimated_emails: 0, sender_emails: [], error };
 
   try {
     const res = await fetch(`${API_URL}/api/engagement/deep-clean/estimate`, {
@@ -325,16 +343,17 @@ export async function estimateDeepClean(
       body: JSON.stringify({ user_id: userId, categories, older_than_days: olderThanDays }),
     });
     const data = await res.json();
-    if (!res.ok) return { senders: 0, estimated_emails: 0, error: data.error };
-    return data;
+    if (!res.ok) return { senders: 0, estimated_emails: 0, sender_emails: [], error: data.error };
+    return { ...data, sender_emails: data.sender_emails ?? [] };
   } catch (err: unknown) {
-    return { senders: 0, estimated_emails: 0, error: err instanceof Error ? err.message : 'Request failed' };
+    return { senders: 0, estimated_emails: 0, sender_emails: [], error: err instanceof Error ? err.message : 'Request failed' };
   }
 }
 
 export async function runDeepClean(
   categories: string[],
   olderThanDays: number | null,
+  excludedEmails: string[] = [],
 ): Promise<{ job?: CleanupJob; error?: string }> {
   const { error, userId } = await requireUser();
   if (error) return { error };
@@ -343,7 +362,7 @@ export async function runDeepClean(
     const res = await fetch(`${API_URL}/api/engagement/deep-clean/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-service-key': SERVICE_KEY },
-      body: JSON.stringify({ user_id: userId, categories, older_than_days: olderThanDays, confirmed: true }),
+      body: JSON.stringify({ user_id: userId, categories, older_than_days: olderThanDays, excluded_emails: excludedEmails, confirmed: true }),
     });
     const data = await res.json();
     if (!res.ok) return { error: data.error };
@@ -500,6 +519,69 @@ export async function trashEmail(messageId: string): Promise<{ success: boolean;
   }
 }
 
+// ── Analysis schedule ─────────────────────────────────────────────────────────
+
+export type AnalysisSchedule = {
+  enabled:      boolean;
+  refresh_day:  string;   // 'monday' … 'sunday'
+  refresh_hour: number;   // 0–23 UTC
+};
+
+export async function getAnalysisSchedule(): Promise<{ schedule: AnalysisSchedule }> {
+  const { error, userId } = await requireUser();
+  if (error) return { schedule: { enabled: true, refresh_day: 'sunday', refresh_hour: 23 } };
+
+  const { data } = await supabaseAdmin
+    .from('users')
+    .select('preferences')
+    .eq('id', userId!)
+    .single();
+
+  const eng = data?.preferences?.engagement ?? {};
+  return {
+    schedule: {
+      enabled:      eng.auto_refresh_enabled !== false,
+      refresh_day:  eng.refresh_day  || 'sunday',
+      refresh_hour: eng.refresh_hour ?? 23,
+    },
+  };
+}
+
+export async function saveAnalysisSchedule(
+  schedule: AnalysisSchedule,
+): Promise<{ error?: string }> {
+  const { error, userId } = await requireUser();
+  if (error) return { error };
+
+  const { data: userData } = await supabaseAdmin
+    .from('users')
+    .select('preferences')
+    .eq('id', userId!)
+    .single();
+
+  const prefs = userData?.preferences ?? {};
+  const eng   = prefs.engagement      ?? {};
+
+  const updated = {
+    ...prefs,
+    engagement: {
+      ...eng,
+      auto_refresh_enabled: schedule.enabled,
+      refresh_day:          schedule.refresh_day,
+      refresh_hour:         schedule.refresh_hour,
+    },
+  };
+
+  const { error: dbErr } = await supabaseAdmin
+    .from('users')
+    .update({ preferences: updated })
+    .eq('id', userId!);
+
+  if (dbErr) return { error: dbErr.message };
+  revalidatePath('/preferences');
+  return {};
+}
+
 // ── Inbox Health ─────────────────────────────────────────────────────────────
 
 export type PendingMilestone = {
@@ -519,11 +601,12 @@ export type InboxHealthComponent = {
 };
 
 export type InboxHealthRecommendation = {
-  priority:      number;
-  label:         string;
-  action:        'senders' | 'deep_clean';
-  impact:        'high' | 'medium' | 'low';
-  points_gained: number;   // projected pts added if this action is completed
+  priority:          number;
+  label:             string;
+  action:            'senders' | 'deep_clean' | 'opt_outs';
+  impact:            'high' | 'medium' | 'low';
+  points_gained:     number;   // projected pts added if this action is completed
+  estimated_minutes: number;   // ~time to complete this action
 };
 
 export type InboxHealthTrendPoint = {
@@ -549,8 +632,14 @@ export type InboxHealthData = {
     unsubscribeable:          number;
     unsubscribed:             number;
     days_since_action:        number;
-    unresolved_opt_outs:      number;
-    // New enriched fields
+    opt_out_count:            number;  // senders with any opt-out reply on record
+    still_sending_count:      number;  // senders still emailing after opt-out
+    still_sending_emails:     number;  // total emails received after opt-out across those senders
+    // Time-cost frame
+    noise_emails_per_month:   number;  // estimated noise emails/month (basis: 30-day period)
+    time_cost_minutes_month:  number;  // minutes/month lost to scanning noise (~5 sec/email)
+    time_cost_hours_year:     number;  // hours/year — the headline "attention tax" number
+    // Enriched fields
     category_counts:          Record<string, number>;   // sender count per category
     email_counts_by_category: Record<string, number>;   // email volume per category
     delta:                    number | null;             // score change vs ~7 days ago
@@ -574,7 +663,7 @@ export async function getInboxHealth(): Promise<{ health: InboxHealthData | null
   const [sendersRes, actionsRes, jobsRes, trendRes] = await Promise.all([
     supabaseAdmin
       .from('sender_engagement')
-      .select('category, has_unsubscribe_header, unsubscribe_status, auto_archive_enabled, ignored, opt_out_replied_at, emails_received')
+      .select('category, has_unsubscribe_header, unsubscribe_status, auto_archive_enabled, ignored, opt_out_replied_at, last_email_date, emails_received')
       .eq('user_id', userId!),
 
     supabaseAdmin
@@ -602,11 +691,15 @@ export async function getInboxHealth(): Promise<{ health: InboxHealthData | null
       .limit(90),
   ]);
 
+  if (sendersRes.error) {
+    console.error('[getInboxHealth] sender_engagement query failed:', sendersRes.error.message);
+  }
   const senders = sendersRes.data ?? [];
   const emptyMeta = {
     total_senders: 0, noise_senders: 0, acted_on: 0,
     unsubscribeable: 0, unsubscribed: 0, days_since_action: 999,
-    unresolved_opt_outs: 0,
+    opt_out_count: 0, still_sending_count: 0, still_sending_emails: 0,
+    noise_emails_per_month: 0, time_cost_minutes_month: 0, time_cost_hours_year: 0,
     category_counts: {}, email_counts_by_category: {},
     delta: null, streak: 0,
   };
@@ -627,9 +720,15 @@ export async function getInboxHealth(): Promise<{ health: InboxHealthData | null
     s.has_unsubscribe_header && s.unsubscribe_status === 'unsubscribed',
   ).length;
 
-  const unresolvedOptOuts = noiseSenders.filter((s) =>
-    s.opt_out_replied_at && s.unsubscribe_status !== 'unsubscribed',
-  ).length;
+  const allOptOuts = senders.filter((s) => s.opt_out_replied_at);
+  const stillSending = allOptOuts.filter((s) => {
+    if (s.unsubscribe_status === 'unsubscribed') return false;
+    if (!s.last_email_date) return false;
+    return new Date(s.last_email_date) > new Date(s.opt_out_replied_at!);
+  });
+  // emails_since_optout is not fetched in this query (migration 007 may not be applied);
+  // use 0 here — the per-sender count is displayed in the Opt-outs tab instead.
+  const stillSendingEmailCount = 0;
 
   const lastAction = actionsRes.data?.[0]?.created_at ?? jobsRes.data?.[0]?.completed_at ?? null;
   const daysSince  = lastAction
@@ -642,9 +741,9 @@ export async function getInboxHealth(): Promise<{ health: InboxHealthData | null
   const cleanupScore      = noiseCount > 0 ? Math.round(25 * (actedOn / noiseCount)) : 25;
   const subscriptionScore = unsubscribeable > 0 ? Math.round(20 * (unsubscribed / unsubscribeable)) : 20;
   const recencyScore      = Math.round(15 * Math.max(0, 1 - daysSince / 60));
-  const replyDebtScore    = unresolvedOptOuts === 0
+  const replyDebtScore    = stillSending.length === 0
     ? 15
-    : Math.round(15 * Math.max(0, 1 - unresolvedOptOuts / 5));
+    : Math.round(15 * Math.max(0, 1 - stillSending.length / 5));
 
   const score = Math.min(100, Math.max(0, noiseScore + cleanupScore + subscriptionScore + recencyScore + replyDebtScore));
 
@@ -675,7 +774,7 @@ export async function getInboxHealth(): Promise<{ health: InboxHealthData | null
     cleanup:      { score: cleanupScore,      max: 25, label: 'Cleanup hygiene',   detail: `${actedOn} of ${noiseCount} noise senders actioned` },
     subscription: { score: subscriptionScore, max: 20, label: 'Subscription debt', detail: `${unsubscribed} of ${unsubscribeable} unsubscribed` },
     recency:      { score: recencyScore,      max: 15, label: 'Recent activity',   detail: lastAction ? `Last action ${Math.round(daysSince)}d ago` : 'No cleanup actions yet' },
-    reply_debt:   { score: replyDebtScore,    max: 15, label: 'Reply health',      detail: unresolvedOptOuts > 0 ? `${unresolvedOptOuts} opt-out replies unresolved` : 'All opt-outs resolved' },
+    reply_debt:   { score: replyDebtScore,    max: 15, label: 'Ignored opt-outs',  detail: stillSending.length > 0 ? `${stillSending.length} sender${stillSending.length > 1 ? 's' : ''} still emailing after opt-out` : allOptOuts.length > 0 ? `${allOptOuts.length} opt-out${allOptOuts.length > 1 ? 's' : ''} — all respected` : 'No opt-out replies on record' },
   };
 
   // ── Recommendations with projected points gained ──────────────────────────
@@ -683,35 +782,51 @@ export async function getInboxHealth(): Promise<{ health: InboxHealthData | null
   const canUnsub     = unsubscribeable - unsubscribed;
   const unactedNoise = noiseCount - actedOn;
 
-  if (unresolvedOptOuts > 0) recs.push({
+  if (stillSending.length > 0) recs.push({
     priority: 1,
-    label: `Unsubscribe from ${unresolvedOptOuts} sender${unresolvedOptOuts > 1 ? 's' : ''} you asked to stop emailing you`,
-    action: 'senders', impact: 'high',
+    label: `${stillSending.length} sender${stillSending.length > 1 ? 's' : ''} ignored your opt-out — unsubscribe to stop them`,
+    action: 'opt_outs', impact: 'high',
     points_gained: 15 - replyDebtScore,
+    estimated_minutes: Math.max(1, stillSending.length),  // ~1 min per sender
   });
   if (canUnsub > 0) recs.push({
     priority: 2,
     label: `Unsubscribe from ${canUnsub} noise sender${canUnsub > 1 ? 's' : ''} with unsubscribe links`,
     action: 'senders', impact: canUnsub > 5 ? 'high' : 'medium',
     points_gained: 20 - subscriptionScore,
+    estimated_minutes: Math.max(1, Math.ceil(canUnsub * 0.5)),  // ~30 sec per sender
   });
   if (unactedNoise > 3) recs.push({
     priority: 3,
     label: `Run a deep clean on ${unactedNoise} unactioned noise sender${unactedNoise > 1 ? 's' : ''}`,
     action: 'deep_clean', impact: unactedNoise > 10 ? 'high' : 'medium',
     points_gained: 25 - cleanupScore,
+    estimated_minutes: 3,   // automated — just review & confirm
   });
   if (daysSince > 30 && score < 80) recs.push({
     priority: 4,
-    label: `${Math.round(daysSince)} days since last cleanup — schedule a recurring clean`,
+    label: `${Math.round(daysSince)} days since last cleanup — run a quick scan`,
     action: 'deep_clean', impact: 'medium',
     points_gained: 15 - recencyScore,
+    estimated_minutes: 3,
   });
+
+  // ── Time cost frame ───────────────────────────────────────────────────────────
+  // Assume ~5 seconds per noise email (recognise subject + scroll past + context switch).
+  // emails_received approximates a ~30-day period (the default analysis window).
+  const noiseEmailsPerMonth   = noiseSenders.reduce((sum, s) => sum + (s.emails_received || 0), 0);
+  const timeCostMinutesMonth  = Math.round(noiseEmailsPerMonth * 5 / 60);
+  const timeCostHoursYear     = +(timeCostMinutesMonth * 12 / 60).toFixed(1);
 
   const metadata = {
     total_senders: totalSenders, noise_senders: noiseCount, acted_on: actedOn,
     unsubscribeable, unsubscribed, days_since_action: Math.round(daysSince),
-    unresolved_opt_outs: unresolvedOptOuts,
+    opt_out_count: allOptOuts.length,
+    still_sending_count: stillSending.length,
+    still_sending_emails: stillSendingEmailCount,
+    noise_emails_per_month: noiseEmailsPerMonth,
+    time_cost_minutes_month: timeCostMinutesMonth,
+    time_cost_hours_year: timeCostHoursYear,
     category_counts, email_counts_by_category, delta, streak,
   };
 
@@ -725,6 +840,43 @@ export async function getInboxHealth(): Promise<{ health: InboxHealthData | null
       metadata,
     },
   };
+}
+
+// ── Opt-out senders ───────────────────────────────────────────────────────────
+
+export type OptOutSender = {
+  sender_email:        string;
+  sender_name:         string | null;
+  sender_domain:       string | null;
+  opt_out_replied_at:  string;           // ISO — when user sent the opt-out reply
+  unsubscribe_status:  string | null;
+  last_email_date:     string | null;
+  emails_since_optout: number;           // emails received AFTER the opt-out date
+  has_unsubscribe_header: boolean;
+  unsubscribe_http_url:   string | null;
+  unsubscribe_mailto:     string | null;
+  category:            string;
+  // Computed client-side:
+  resolution?: 'unsubscribed' | 'still_sending' | 'went_quiet';
+};
+
+export async function getOptOutSenders(): Promise<{ senders: OptOutSender[] }> {
+  const { error, userId } = await requireUser();
+  if (error) return { senders: [] };
+
+  const { data } = await supabaseAdmin
+    .from('sender_engagement')
+    .select(`
+      sender_email, sender_name, sender_domain,
+      opt_out_replied_at, unsubscribe_status, last_email_date,
+      emails_since_optout, has_unsubscribe_header,
+      unsubscribe_http_url, unsubscribe_mailto, category
+    `)
+    .eq('user_id', userId!)
+    .not('opt_out_replied_at', 'is', null)
+    .order('opt_out_replied_at', { ascending: false });
+
+  return { senders: (data ?? []) as OptOutSender[] };
 }
 
 // ── Storage analysis ──────────────────────────────────────────────────────────
@@ -784,33 +936,78 @@ export async function disableScreener(): Promise<{ success: boolean; error?: str
   }
 }
 
-export async function getScreenerQueue(): Promise<{ queue: ScreenerSender[]; settings: { enabled: boolean; last_scan: string | null; whitelist: string[] }; error?: string }> {
+export type ScreenerStats = {
+  total:    number;
+  pending:  number;
+  approved: number;
+  blocked:  number;
+};
+
+export async function getScreenerQueue(): Promise<{
+  queue:    ScreenerSender[];
+  settings: { enabled: boolean; last_scan: string | null; whitelist: string[] };
+  stats:    ScreenerStats;
+  error?:   string;
+}> {
+  const emptyStats: ScreenerStats = { total: 0, pending: 0, approved: 0, blocked: 0 };
   const { error, userId } = await requireUser();
-  if (error) return { queue: [], settings: { enabled: false, last_scan: null, whitelist: [] }, error };
+  if (error) return { queue: [], settings: { enabled: false, last_scan: null, whitelist: [] }, stats: emptyStats, error };
 
-  const { data: queueData } = await supabaseAdmin
-    .from('screener_senders')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('status', 'pending')
-    .order('created_at', { ascending: false })
-    .limit(100);
+  const [{ data: queueData }, { data: allRows }, { data: user }] = await Promise.all([
+    supabaseAdmin
+      .from('screener_senders')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+      .limit(100),
+    supabaseAdmin
+      .from('screener_senders')
+      .select('status')
+      .eq('user_id', userId),
+    supabaseAdmin
+      .from('users')
+      .select('preferences')
+      .eq('id', userId)
+      .single(),
+  ]);
 
-  const { data: user } = await supabaseAdmin
-    .from('users')
-    .select('preferences')
-    .eq('id', userId)
-    .single();
+  const prefs = (user as { preferences?: Record<string, Record<string, unknown>> } | null)?.preferences?.engagement || {};
+  const rows  = allRows ?? [];
+  const stats: ScreenerStats = {
+    total:    rows.length,
+    pending:  rows.filter((r) => r.status === 'pending').length,
+    approved: rows.filter((r) => r.status === 'approved').length,
+    blocked:  rows.filter((r) => r.status === 'blocked').length,
+  };
 
-  const prefs = user?.preferences?.engagement || {};
   return {
     queue:    (queueData ?? []) as ScreenerSender[],
     settings: {
-      enabled:   !!prefs.screener_enabled,
-      last_scan: prefs.screener_last_scan || null,
-      whitelist: prefs.screener_whitelist || [],
+      enabled:   !!(prefs.screener_enabled),
+      last_scan: (prefs.screener_last_scan as string) || null,
+      whitelist: (prefs.screener_whitelist as string[]) || [],
     },
+    stats,
   };
+}
+
+export async function triggerScreenerScan(): Promise<{ error?: string }> {
+  const { error, userId } = await requireUser();
+  if (error) return { error };
+
+  try {
+    const res = await fetch(`${API_URL}/api/engagement/screener/scan`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'x-service-key': SERVICE_KEY },
+      body:    JSON.stringify({ user_id: userId }),
+    });
+    const data = await res.json();
+    if (!res.ok) return { error: data.error };
+    return {};
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : 'Request failed' };
+  }
 }
 
 export async function reviewScreenerBatch(
@@ -881,4 +1078,299 @@ export async function dismissMilestone(): Promise<{ success: boolean }> {
     .eq('id', userId!);
 
   return { success: true };
+}
+
+// ── Email Type Intelligence ───────────────────────────────────────────────────
+
+export type EmailTypeStat = {
+  email_type:  string;
+  email_count: number;
+  open_count:  number;
+};
+
+/**
+ * Returns per-sender email type breakdowns from sender_type_stats.
+ * Keyed by sender_email for O(1) lookup in the sender table.
+ */
+export async function getSenderTypeStats(
+  periodDays = 90,
+): Promise<{ typeStatsBySender: Record<string, EmailTypeStat[]>; error?: string }> {
+  const { error, userId } = await requireUser();
+  if (error) return { typeStatsBySender: {}, error };
+
+  const { data, error: dbError } = await supabaseAdmin
+    .from('sender_type_stats')
+    .select('sender_email, email_type, email_count, open_count')
+    .eq('user_id', userId!)
+    .eq('period_days', periodDays)
+    .order('email_count', { ascending: false });
+
+  if (dbError) return { typeStatsBySender: {}, error: dbError.message };
+
+  const result: Record<string, EmailTypeStat[]> = {};
+  for (const row of data ?? []) {
+    if (!result[row.sender_email]) result[row.sender_email] = [];
+    result[row.sender_email].push({
+      email_type:  row.email_type,
+      email_count: row.email_count,
+      open_count:  row.open_count,
+    });
+  }
+
+  return { typeStatsBySender: result };
+}
+
+// ── Cadence-aware filter suggestions ─────────────────────────────────────────
+
+export type FilterSuggestionKind =
+  | 'smart_archive'       // Mixed sender: valuable type + noise type → archive but keep receipts
+  | 'full_archive'        // All types low-open → straight auto-archive
+  | 'unsubscribe_noise';  // High frequency, all noise, has unsubscribe link
+
+export type TypeSummary = {
+  email_type:  string;
+  email_count: number;
+  open_rate:   number; // 0–1
+};
+
+export type FilterSuggestion = {
+  sender_email:          string;
+  sender_name:           string | null;
+  category:              string;
+  emails_per_week:       number;
+  period_days:           number;
+  kind:                  FilterSuggestionKind;
+  message:               string;          // plain-English explanation
+  valuable_types:        TypeSummary[];   // types worth keeping (open_rate >= 0.50)
+  noise_types:           TypeSummary[];   // types to eliminate (open_rate < 0.10)
+  has_unsubscribe_header: boolean;
+  auto_archive_enabled:  boolean;
+};
+
+export async function getFilterSuggestions(): Promise<{
+  suggestions: FilterSuggestion[];
+  error?: string;
+}> {
+  const { error, userId } = await requireUser();
+  if (error) return { suggestions: [], error };
+
+  // Fetch engagement rows for candidates (enough volume, not already handled)
+  const { data: engRows, error: engErr } = await supabaseAdmin
+    .from('sender_engagement')
+    .select('sender_email, sender_name, category, emails_received, period_days, engagement_rate, auto_archive_enabled, unsubscribe_status, has_unsubscribe_header')
+    .eq('user_id', userId!)
+    .eq('auto_archive_enabled', false)
+    .neq('unsubscribe_status', 'unsubscribed')
+    .not('category', 'in', '(known_contact,transactional)')
+    .gte('emails_received', 10)
+    .order('emails_received', { ascending: false })
+    .limit(200);
+
+  if (engErr) return { suggestions: [], error: engErr.message };
+  if (!engRows?.length) return { suggestions: [] };
+
+  // Fetch type stats for these senders
+  const senderEmails = engRows.map((r) => r.sender_email);
+  const { data: typeRows, error: typeErr } = await supabaseAdmin
+    .from('sender_type_stats')
+    .select('sender_email, email_type, email_count, open_count')
+    .eq('user_id', userId!)
+    .in('sender_email', senderEmails);
+
+  if (typeErr) return { suggestions: [], error: typeErr.message };
+
+  // Build type stats map: email → TypeSummary[]
+  const typeMap = new Map<string, TypeSummary[]>();
+  for (const row of typeRows ?? []) {
+    const openRate = row.email_count > 0 ? row.open_count / row.email_count : 0;
+    if (!typeMap.has(row.sender_email)) typeMap.set(row.sender_email, []);
+    typeMap.get(row.sender_email)!.push({
+      email_type:  row.email_type,
+      email_count: row.email_count,
+      open_rate:   openRate,
+    });
+  }
+
+  const suggestions: FilterSuggestion[] = [];
+
+  for (const eng of engRows) {
+    const types = typeMap.get(eng.sender_email);
+    if (!types || types.length < 2) continue; // need mixed types for a cadence insight
+
+    const valuableTypes = types.filter((t) => t.open_rate >= 0.50 && t.email_count >= 3);
+    const noiseTypes    = types.filter((t) => t.open_rate < 0.10  && t.email_count >= 3);
+
+    // Need both a valuable type AND a noise type for a smart_archive suggestion
+    if (!valuableTypes.length || !noiseTypes.length) continue;
+
+    const emailsPerWeek = Math.round((eng.emails_received / Math.max(eng.period_days, 1)) * 7 * 10) / 10;
+
+    // Sort for display: most frequent first
+    valuableTypes.sort((a, b) => b.email_count - a.email_count);
+    noiseTypes.sort((a, b) => b.email_count - a.email_count);
+
+    const topValuable = valuableTypes[0];
+    const topNoise    = noiseTypes[0];
+
+    const valuableLabel = topValuable.email_type.charAt(0).toUpperCase() + topValuable.email_type.slice(1) + 's';
+    const noiseLabel    = topNoise.email_type.charAt(0).toUpperCase() + topNoise.email_type.slice(1) + 's';
+    const totalEmails   = types.reduce((n, t) => n + t.email_count, 0);
+    const valuablePct   = Math.round((valuableTypes.reduce((n, t) => n + t.email_count, 0) / totalEmails) * 100);
+    const noisePct      = Math.round((noiseTypes.reduce((n, t) => n + t.email_count, 0) / totalEmails) * 100);
+
+    const displayName = eng.sender_name || eng.sender_email;
+
+    suggestions.push({
+      sender_email:           eng.sender_email,
+      sender_name:            eng.sender_name,
+      category:               eng.category,
+      emails_per_week:        emailsPerWeek,
+      period_days:            eng.period_days,
+      kind:                   'smart_archive',
+      message: `${displayName} sends ~${emailsPerWeek}/week. ${valuablePct}% are ${valuableLabel} (${Math.round(topValuable.open_rate * 100)}% opened) — ${noisePct}% are ${noiseLabel} (${Math.round(topNoise.open_rate * 100)}% opened). Auto-archive will skip the inbox but keep ${valuableLabel.toLowerCase()} coming through.`,
+      valuable_types:         valuableTypes,
+      noise_types:            noiseTypes,
+      has_unsubscribe_header: eng.has_unsubscribe_header,
+      auto_archive_enabled:   eng.auto_archive_enabled,
+    });
+
+    if (suggestions.length >= 20) break; // cap at 20 suggestions
+  }
+
+  return { suggestions };
+}
+
+// ── Filter audit ──────────────────────────────────────────────────────────────
+
+export type FilterIssueType = 'orphaned' | 'dead' | 'duplicate' | 'untracked' | 'stale_reference';
+
+export type FilterIssue = {
+  type:          FilterIssueType;
+  filter_id:     string;
+  from_value:    string;
+  sender_email?: string;
+  is_tracked:    boolean;
+  // orphaned
+  reason?:       string;
+  category?:     string;
+  // dead
+  days_silent?:  number | null;
+  // duplicate
+  action?:       string;
+  original_id?:  string;
+};
+
+export type FilterAuditSummary = {
+  total_gmail_filters: number;
+  archive_filters:     number;
+  orphaned:            number;
+  dead:                number;
+  duplicate:           number;
+  untracked:           number;
+  stale_reference:     number;
+  total_issues:        number;
+};
+
+export type FilterAuditResult = {
+  issues:  FilterIssue[];
+  summary: FilterAuditSummary;
+  error?:  string;
+};
+
+export async function getFilterAudit(): Promise<FilterAuditResult> {
+  const { error, userId } = await requireUser();
+  const empty: FilterAuditResult = {
+    issues:  [],
+    summary: { total_gmail_filters: 0, archive_filters: 0, orphaned: 0, dead: 0, duplicate: 0, untracked: 0, stale_reference: 0, total_issues: 0 },
+  };
+  if (error) return { ...empty, error };
+
+  try {
+    const res = await fetch(`${API_URL}/api/engagement/filter-audit`, {
+      headers: { 'x-service-key': SERVICE_KEY, 'x-user-id': userId! },
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return { ...empty, error: data.error || `HTTP ${res.status}` };
+    }
+    const data = await res.json();
+    return { issues: data.issues || [], summary: data.summary || empty.summary };
+  } catch (err: unknown) {
+    return { ...empty, error: err instanceof Error ? err.message : 'Request failed' };
+  }
+}
+
+export async function deleteFilterAuditItem(filterId: string): Promise<{ success: boolean; error?: string }> {
+  const { error, userId: _userId } = await requireUser();
+  if (error) return { success: false, error };
+
+  try {
+    const res = await fetch(`${API_URL}/api/engagement/filter-audit/${encodeURIComponent(filterId)}`, {
+      method:  'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      // Uses session cookie auth (authenticateSession) — no service key needed
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return { success: false, error: data.error || `HTTP ${res.status}` };
+    }
+    revalidatePath('/sender-intelligence');
+    return { success: true };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : 'Request failed' };
+  }
+}
+
+// ── Auto-clean: manual one-time run ──────────────────────────────────────────
+
+export type AutoCleanRuleSpec = {
+  calendar?:      { enabled: boolean; days_after: number };
+  otp?:           { enabled: boolean };
+  promo?:         { enabled: boolean; days_after: number };
+  shipping?:      { enabled: boolean };
+  social?:        { enabled: boolean };
+  look_back_days?: number | null;
+};
+
+export type AutoCleanResult = Record<string, { deleted: number } | { error: string }>;
+
+export async function estimateAutoCleanNow(
+  rules: AutoCleanRuleSpec,
+): Promise<{ estimates?: Record<string, number>; error?: string }> {
+  const { error, userId } = await requireUser();
+  if (error) return { error };
+
+  try {
+    const res = await fetch(`${API_URL}/api/engagement/auto-clean/estimate`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'x-service-key': SERVICE_KEY },
+      body:    JSON.stringify({ user_id: userId, rules }),
+    });
+    const data = await res.json();
+    if (!res.ok) return { error: data.error ?? `HTTP ${res.status}` };
+    return { estimates: data.estimates };
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : 'Request failed' };
+  }
+}
+
+export async function runAutoCleanNow(
+  rules: AutoCleanRuleSpec,
+): Promise<{ results?: AutoCleanResult; error?: string }> {
+  const { error, userId } = await requireUser();
+  if (error) return { error };
+
+  try {
+    const res = await fetch(`${API_URL}/api/engagement/auto-clean/run`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'x-service-key': SERVICE_KEY },
+      body:    JSON.stringify({ user_id: userId, rules }),
+    });
+    const data = await res.json();
+    if (!res.ok) return { error: data.error ?? `HTTP ${res.status}` };
+    return { results: data.results };
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : 'Request failed' };
+  }
 }

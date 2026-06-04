@@ -5,10 +5,10 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { HardDrive, RefreshCw, Loader2, Trash2, AlertTriangle, ExternalLink } from 'lucide-react';
+import { HardDrive, RefreshCw, Loader2, Trash2, AlertTriangle, ExternalLink, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn }     from '@/lib/utils';
-import { getStorageAnalysis, trashEmail, type StorageResult, type StorageSender, type LargeEmail } from '@/app/actions/engagement';
+import { getStorageAnalysis, trashEmail, executeBulkAction, type StorageResult, type StorageSender, type LargeEmail } from '@/app/actions/engagement';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -23,7 +23,7 @@ function mbBar(mb: string, maxMb: number) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function StorageTab({ onDeleteSender }: { onDeleteSender: (email: string) => void }) {
+export function StorageTab() {
   const [result,   setResult]   = useState<StorageResult | null>(null);
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState<string | null>(null);
@@ -85,6 +85,39 @@ export function StorageTab({ onDeleteSender }: { onDeleteSender: (email: string)
         </div>
       )}
 
+      {result && (() => {
+        const scannedMb  = parseFloat(result.total_scanned_mb) || 0;
+        const quotaMb    = 15 * 1024; // 15 GB in MB
+        const quotaPct   = Math.min(100, (scannedMb / quotaMb) * 100);
+        const scannedGb  = (scannedMb / 1024).toFixed(2);
+        return (
+          <div className="flex items-center gap-3 px-6 py-2.5 border-b border-border shrink-0 bg-muted/30">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-muted-foreground">
+                  Large emails ({'>'}1 MB): <strong className="text-foreground">{scannedGb} GB</strong>
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Gmail quota: 15 GB shared · {quotaPct.toFixed(1)}% of quota
+                </span>
+              </div>
+              <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                <div
+                  className={cn(
+                    'h-full rounded-full transition-all',
+                    quotaPct > 80 ? 'bg-red-500' : quotaPct > 50 ? 'bg-amber-400' : 'bg-blue-400',
+                  )}
+                  style={{ width: `${quotaPct}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Scan covers emails over 1 MB — Drive and Photos also count toward the 15 GB Gmail quota.
+              </p>
+            </div>
+          </div>
+        );
+      })()}
+
       {result && (
         <>
           {/* Tabs */}
@@ -106,7 +139,7 @@ export function StorageTab({ onDeleteSender }: { onDeleteSender: (email: string)
           {/* Table */}
           <div className="flex-1 overflow-auto">
             {tab === 'senders' ? (
-              <SenderStorageTable senders={result.senders_by_storage} maxMb={maxMb} onDelete={onDeleteSender} />
+              <SenderStorageTable senders={result.senders_by_storage} maxMb={maxMb} />
             ) : (
               <LargeEmailTable emails={result.largest_emails} />
             )}
@@ -117,14 +150,41 @@ export function StorageTab({ onDeleteSender }: { onDeleteSender: (email: string)
   );
 }
 
+type SenderRowState = 'idle' | 'confirming' | 'deleting' | 'deleted';
+
 function SenderStorageTable({
-  senders, maxMb, onDelete,
+  senders: initialSenders, maxMb,
 }: {
   senders: StorageSender[];
   maxMb:   number;
-  onDelete: (email: string) => void;
 }) {
-  if (!senders.length) {
+  const [rows,     setRows]     = useState<StorageSender[]>(initialSenders);
+  const [rowState, setRowState] = useState<Map<string, SenderRowState>>(new Map());
+
+  function getState(email: string): SenderRowState {
+    return rowState.get(email) ?? 'idle';
+  }
+
+  function setState(email: string, state: SenderRowState) {
+    setRowState((prev) => new Map([...prev, [email, state]]));
+  }
+
+  async function handleDelete(s: StorageSender) {
+    setState(s.sender_email, 'deleting');
+    const { succeeded, error } = await executeBulkAction('bulk_delete', [s.sender_email]);
+    if (error || succeeded === 0) {
+      toast.error(`Could not delete emails from ${s.sender_name || s.sender_email}`);
+      setState(s.sender_email, 'idle');
+      return;
+    }
+    // Show green confirmation briefly, then fade the row out.
+    setState(s.sender_email, 'deleted');
+    setTimeout(() => {
+      setRows((prev) => prev.filter((r) => r.sender_email !== s.sender_email));
+    }, 1400);
+  }
+
+  if (!rows.length) {
     return (
       <div className="text-center py-12 text-muted-foreground text-sm">
         No emails over 1 MB found. Your inbox is storage-efficient!
@@ -140,40 +200,85 @@ function SenderStorageTable({
           <th className="px-6 py-3 text-right font-medium text-muted-foreground">Emails</th>
           <th className="px-6 py-3 text-right font-medium text-muted-foreground">Total size</th>
           <th className="px-6 py-3 text-left font-medium text-muted-foreground hidden md:table-cell w-40">Usage</th>
-          <th className="px-6 py-3 w-10" />
+          <th className="px-6 py-3 w-24" />
         </tr>
       </thead>
       <tbody className="divide-y divide-border">
-        {senders.map((s) => (
-          <tr key={s.sender_email} className="hover:bg-muted/30 transition-colors">
-            <td className="px-6 py-3 max-w-xs">
-              <div className="font-medium truncate">{s.sender_name || s.sender_email}</div>
-              {s.sender_name && <div className="text-xs text-muted-foreground truncate">{s.sender_email}</div>}
-            </td>
-            <td className="px-6 py-3 text-right tabular-nums text-muted-foreground">
-              {s.message_count.toLocaleString()}
-            </td>
-            <td className="px-6 py-3 text-right tabular-nums font-medium">
-              {parseFloat(s.total_mb) >= 1000
-                ? `${(parseFloat(s.total_mb) / 1024).toFixed(1)} GB`
-                : `${s.total_mb} MB`}
-            </td>
-            <td className="px-6 py-3 hidden md:table-cell">
-              {mbBar(s.total_mb, maxMb)}
-            </td>
-            <td className="px-6 py-3">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                onClick={() => onDelete(s.sender_email)}
-                title="Delete all emails from this sender"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </Button>
-            </td>
-          </tr>
-        ))}
+        {rows.map((s) => {
+          const state = getState(s.sender_email);
+          return (
+            <tr
+              key={s.sender_email}
+              className={cn(
+                'transition-all duration-500',
+                state === 'deleted'
+                  ? 'opacity-0 bg-green-50'
+                  : state === 'confirming'
+                    ? 'bg-red-50/50'
+                    : 'hover:bg-muted/30',
+              )}
+            >
+              <td className="px-6 py-3 max-w-xs">
+                <div className="font-medium truncate">{s.sender_name || s.sender_email}</div>
+                {s.sender_name && <div className="text-xs text-muted-foreground truncate">{s.sender_email}</div>}
+              </td>
+              <td className="px-6 py-3 text-right tabular-nums text-muted-foreground">
+                {s.message_count.toLocaleString()}
+              </td>
+              <td className="px-6 py-3 text-right tabular-nums font-medium">
+                {parseFloat(s.total_mb) >= 1000
+                  ? `${(parseFloat(s.total_mb) / 1024).toFixed(1)} GB`
+                  : `${s.total_mb} MB`}
+              </td>
+              <td className="px-6 py-3 hidden md:table-cell">
+                {mbBar(s.total_mb, maxMb)}
+              </td>
+              <td className="px-6 py-3">
+                {state === 'confirming' ? (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">Delete all?</span>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => handleDelete(s)}
+                    >
+                      Yes
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => setState(s.sender_email, 'idle')}
+                    >
+                      No
+                    </Button>
+                  </div>
+                ) : state === 'deleting' ? (
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span className="text-xs">Deleting…</span>
+                  </div>
+                ) : state === 'deleted' ? (
+                  <div className="flex items-center gap-1.5 text-green-600">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span className="text-xs font-medium">Deleted</span>
+                  </div>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                    onClick={() => setState(s.sender_email, 'confirming')}
+                    title="Delete all emails from this sender"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                )}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );

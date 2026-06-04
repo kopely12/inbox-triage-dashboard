@@ -31,7 +31,9 @@ function validatePrefsPartial(partial: Partial<ExtensionPrefs>): string | null {
     'read_old', 'read_promo', 'skip_newsletters', 'skip_receipts', 'skip_calendar',
     'skip_social', 'skip_financial', 'compose_detection', 'followup_suggestions',
     'draft_replies', 'overdue_days', 'personal_context', 'internal_domains',
-    'keyboard_shortcuts', 'tasks_default_view', 'theme',
+    'keyboard_shortcuts', 'tasks_default_view', 'theme', 'gmail_folders_enabled',
+    'auto_clean_calendar', 'auto_clean_calendar_days', 'auto_clean_otp',
+    'auto_clean_promo', 'auto_clean_promo_days', 'auto_clean_shipping', 'auto_clean_social',
   ]);
 
   for (const key of Object.keys(p)) {
@@ -86,11 +88,27 @@ function validatePrefsPartial(partial: Partial<ExtensionPrefs>): string | null {
       return 'working_hours.days must be an array of valid day strings';
   }
 
+  // auto_clean_calendar_days: integer 1–30
+  if ('auto_clean_calendar_days' in p) {
+    const v = Number(p.auto_clean_calendar_days);
+    if (!Number.isInteger(v) || v < 1 || v > 30)
+      return 'auto_clean_calendar_days must be an integer 1–30';
+  }
+
+  // auto_clean_promo_days: integer 7–365
+  if ('auto_clean_promo_days' in p) {
+    const v = Number(p.auto_clean_promo_days);
+    if (!Number.isInteger(v) || v < 7 || v > 365)
+      return 'auto_clean_promo_days must be an integer 7–365';
+  }
+
   // Boolean fields
   for (const field of [
     'read_body', 'read_sent', 'read_old', 'read_promo', 'skip_newsletters',
     'skip_receipts', 'skip_calendar', 'skip_social', 'skip_financial',
     'compose_detection', 'followup_suggestions', 'draft_replies', 'keyboard_shortcuts',
+    'gmail_folders_enabled',
+    'auto_clean_calendar', 'auto_clean_otp', 'auto_clean_promo', 'auto_clean_shipping', 'auto_clean_social',
   ] as const) {
     if (field in p && typeof p[field] !== 'boolean') return `${field} must be a boolean`;
   }
@@ -125,6 +143,16 @@ export async function saveExtensionPrefs(
 
   const userId = session.user.id;
 
+  // Diagnose FK issue: verify this userId exists in the users table
+  const { data: userRow } = await supabaseAdmin
+    .from('users')
+    .select('id')
+    .eq('id', userId)
+    .maybeSingle();
+  if (!userRow) {
+    return { error: `userId ${userId} not found in users table — session may be stale` };
+  }
+
   // Fetch existing row so we can deep-merge
   const { data: existing } = await supabaseAdmin
     .from('user_preferences')
@@ -143,8 +171,7 @@ export async function saveExtensionPrefs(
     );
 
   if (error) {
-    console.error('[extension-prefs] upsert error:', error.message);
-    return { error: 'Failed to save preferences.' };
+    return { error: `DB error: ${error.message} | userId: ${userId} | rowExists: ${!!existing}` };
   }
 
   revalidatePath('/preferences');

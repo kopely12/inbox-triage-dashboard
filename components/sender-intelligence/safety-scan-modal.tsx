@@ -27,6 +27,10 @@ export function SafetyScanModal({ senderEmails, olderThanDays, emailCount, onCon
   const [error,     setError]     = useState<string | null>(null);
 
   useEffect(() => {
+    if (senderEmails.length === 0) {
+      setScanning(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       const result = await scanBeforeDelete(senderEmails, olderThanDays);

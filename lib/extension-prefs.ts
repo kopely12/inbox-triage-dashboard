@@ -30,6 +30,15 @@ export type ExtensionPrefs = {
   keyboard_shortcuts:   boolean;
   tasks_default_view:   string;
   theme:                string;
+  gmail_folders_enabled:    boolean;
+  // Auto-clean
+  auto_clean_calendar:      boolean;
+  auto_clean_calendar_days: number;
+  auto_clean_otp:           boolean;
+  auto_clean_promo:         boolean;
+  auto_clean_promo_days:    number;
+  auto_clean_shipping:      boolean;
+  auto_clean_social:        boolean;
 };
 
 export const PREFS_DEFAULTS: ExtensionPrefs = {
@@ -43,4 +52,10 @@ export const PREFS_DEFAULTS: ExtensionPrefs = {
   compose_detection: true, followup_suggestions: true, draft_replies: true,
   overdue_days: 14, personal_context: '', internal_domains: [],
   keyboard_shortcuts: true, tasks_default_view: 'grouped', theme: 'auto',
+  gmail_folders_enabled: false,
+  auto_clean_calendar: false, auto_clean_calendar_days: 7,
+  auto_clean_otp: false,
+  auto_clean_promo: false, auto_clean_promo_days: 60,
+  auto_clean_shipping: false,
+  auto_clean_social: false,
 };

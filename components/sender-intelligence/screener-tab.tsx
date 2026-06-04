@@ -6,12 +6,16 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { Shield, ShieldCheck, ShieldOff, Loader2, RefreshCw, Check, X, AlertTriangle, Info } from 'lucide-react';
+import {
+  Shield, ShieldCheck, ShieldOff, Loader2, RefreshCw, Check, X, AlertTriangle, Info,
+  ShieldAlert, ShieldQuestion,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn }     from '@/lib/utils';
 import {
   enableScreener, disableScreener, getScreenerQueue, reviewScreenerBatch,
-  type ScreenerSender,
+  triggerScreenerScan,
+  type ScreenerSender, type TrustSignals, type ScreenerStats,
 } from '@/app/actions/engagement';
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -21,8 +25,10 @@ export function ScreenerTab() {
   const [settings, setSettings] = useState<{ enabled: boolean; last_scan: string | null; whitelist: string[] }>({
     enabled: false, last_scan: null, whitelist: [],
   });
+  const [stats,    setStats]    = useState<ScreenerStats>({ total: 0, pending: 0, approved: 0, blocked: 0 });
   const [loading,  setLoading]  = useState(true);
   const [toggling, setToggling] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [reviewing, setReviewing] = useState(false);
 
@@ -32,9 +38,19 @@ export function ScreenerTab() {
     if (!data.error) {
       setQueue(data.queue);
       setSettings(data.settings);
+      setStats(data.stats ?? { total: 0, pending: 0, approved: 0, blocked: 0 });
     }
     setLoading(false);
   }, []);
+
+  async function handleScanNow() {
+    setScanning(true);
+    const { error } = await triggerScreenerScan();
+    setScanning(false);
+    if (error) { toast.error(error); return; }
+    toast.success('Scan complete — queue updated.');
+    load();
+  }
 
   useEffect(() => { load(); }, [load]);
 
@@ -134,10 +150,18 @@ export function ScreenerTab() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => load()} disabled={loading}>
-            <RefreshCw className={cn('w-3.5 h-3.5 mr-1.5', loading && 'animate-spin')} />
-            Refresh
-          </Button>
+          {settings.enabled && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleScanNow}
+              disabled={scanning || loading}
+              title="Scan your inbox now for new senders"
+            >
+              <RefreshCw className={cn('w-3.5 h-3.5 mr-1.5', scanning && 'animate-spin')} />
+              {scanning ? 'Scanning…' : 'Scan now'}
+            </Button>
+          )}
           <Button
             variant={settings.enabled ? 'outline' : 'default'}
             size="sm"
@@ -154,6 +178,18 @@ export function ScreenerTab() {
       </div>
 
       {/* ── Explainer (when disabled) ───────────────────────────────────────── */}
+      {/* Stats strip — shown when screener has processed at least one sender */}
+      {settings.enabled && stats.total > 0 && (
+        <div className="flex items-center gap-6 px-6 py-2.5 bg-muted/40 border-b border-border text-xs text-muted-foreground shrink-0">
+          <span><strong className="text-foreground tabular-nums">{stats.total}</strong> total screened</span>
+          <span><strong className="text-green-600 tabular-nums">{stats.approved}</strong> approved</span>
+          <span><strong className="text-red-600 tabular-nums">{stats.blocked}</strong> blocked</span>
+          {stats.pending > 0 && (
+            <span><strong className="text-amber-600 tabular-nums">{stats.pending}</strong> pending review</span>
+          )}
+        </div>
+      )}
+
       {!settings.enabled && (
         <div className="px-6 py-6 flex-1">
           <div className="max-w-lg">
@@ -220,6 +256,28 @@ export function ScreenerTab() {
             </div>
           )}
 
+          {/* Risk summary banner — shown when lookalikes or auth failures in queue */}
+          {(() => {
+            const lookalikes = queue.filter((s) => s.lookalike_of);
+            const authFails  = queue.filter((s) =>
+              s.trust_signals && (s.trust_signals.spf === 'fail' || s.trust_signals.dkim === 'fail'),
+            );
+            if (!lookalikes.length && !authFails.length) return null;
+            return (
+              <div className="flex items-center gap-2 px-6 py-2.5 bg-red-50 border-b border-red-200 text-red-800 text-sm shrink-0">
+                <ShieldAlert className="w-4 h-4 shrink-0 text-red-600" />
+                <span className="flex-1">
+                  {lookalikes.length > 0 && (
+                    <><strong>{lookalikes.length}</strong> sender{lookalikes.length !== 1 ? 's' : ''} resemble{lookalikes.length === 1 ? 's' : ''} a domain you trust — possible impersonation.{' '}</>
+                  )}
+                  {authFails.length > 0 && (
+                    <><strong>{authFails.length}</strong> sender{authFails.length !== 1 ? 's' : ''} failed email authentication (SPF/DKIM).</>
+                  )}
+                </span>
+              </div>
+            );
+          })()}
+
           {/* Empty queue */}
           {queue.length === 0 ? (
             <div className="flex flex-col items-center justify-center flex-1 gap-3 text-muted-foreground py-20">
@@ -246,13 +304,20 @@ export function ScreenerTab() {
                     </th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Sender</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Sample Subject</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Trust</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden lg:table-cell">Emails</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden xl:table-cell">First Seen</th>
                     <th className="px-4 py-3 w-28" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {queue.map((sender) => (
+                  {[...queue].sort((a, b) => {
+                    // Lookalikes first, then auth failures, then the rest
+                    const riskScore = (s: ScreenerSender) =>
+                      s.lookalike_of ? 2 :
+                      (s.trust_signals?.spf === 'fail' || s.trust_signals?.dkim === 'fail') ? 1 : 0;
+                    return riskScore(b) - riskScore(a);
+                  }).map((sender) => (
                     <ScreenerRow
                       key={sender.sender_email}
                       sender={sender}
@@ -273,6 +338,65 @@ export function ScreenerTab() {
   );
 }
 
+// ── TrustBadges ───────────────────────────────────────────────────────────────
+
+function TrustBadges({ signals, lookalikeOf }: { signals: TrustSignals | null; lookalikeOf: string | null }) {
+  if (!signals && !lookalikeOf) {
+    return <span className="text-xs text-muted-foreground">—</span>;
+  }
+
+  const badges: React.ReactNode[] = [];
+
+  if (lookalikeOf) {
+    badges.push(
+      <span
+        key="lookalike"
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700 border border-red-200"
+        title={`This domain closely resembles "${lookalikeOf}" — possible impersonation`}
+      >
+        <ShieldAlert className="w-2.5 h-2.5" />
+        Looks like {lookalikeOf}
+      </span>,
+    );
+  }
+
+  if (signals) {
+    const authStatus = (() => {
+      if (signals.spf === 'fail' || signals.dkim === 'fail') return 'fail';
+      if (signals.spf === 'pass' && signals.dkim === 'pass') return 'pass';
+      if (signals.dmarc === 'pass') return 'pass';
+      return 'unknown';
+    })();
+
+    if (authStatus === 'fail') {
+      badges.push(
+        <span
+          key="auth"
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700 border border-orange-200"
+          title={`Email authentication failed — SPF: ${signals.spf} · DKIM: ${signals.dkim} · DMARC: ${signals.dmarc}`}
+        >
+          <ShieldAlert className="w-2.5 h-2.5" />
+          Unverified
+        </span>,
+      );
+    } else if (authStatus === 'pass') {
+      badges.push(
+        <span
+          key="auth"
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 text-green-700 border border-green-200"
+          title={`Email authentication passed — SPF: ${signals.spf} · DKIM: ${signals.dkim} · DMARC: ${signals.dmarc}`}
+        >
+          <ShieldCheck className="w-2.5 h-2.5" />
+          Verified
+        </span>,
+      );
+    }
+    // Unknown auth: show nothing — absence of badge means inconclusive
+  }
+
+  return <div className="flex flex-col gap-1">{badges}</div>;
+}
+
 // ── ScreenerRow ───────────────────────────────────────────────────────────────
 
 function ScreenerRow({
@@ -285,8 +409,15 @@ function ScreenerRow({
   onBlock:    () => void;
   reviewing:  boolean;
 }) {
+  const isRisky = !!sender.lookalike_of ||
+    (sender.trust_signals?.spf === 'fail' || sender.trust_signals?.dkim === 'fail');
+
   return (
-    <tr className={cn('hover:bg-muted/30 transition-colors', isSelected && 'bg-primary/5')}>
+    <tr className={cn(
+      'hover:bg-muted/30 transition-colors',
+      isSelected && 'bg-primary/5',
+      isRisky && 'bg-red-50/50',
+    )}>
       <td className="px-4 py-3 w-10">
         <input
           type="checkbox"
@@ -306,6 +437,9 @@ function ScreenerRow({
       </td>
       <td className="px-4 py-3 text-muted-foreground hidden md:table-cell max-w-sm">
         <span className="line-clamp-1 text-xs">{sender.sample_subject || '—'}</span>
+      </td>
+      <td className="px-4 py-3 hidden lg:table-cell">
+        <TrustBadges signals={sender.trust_signals} lookalikeOf={sender.lookalike_of} />
       </td>
       <td className="px-4 py-3 text-right tabular-nums text-muted-foreground hidden lg:table-cell">
         {sender.email_count}
@@ -331,7 +465,12 @@ function ScreenerRow({
           <Button
             size="sm"
             variant="ghost"
-            className="h-7 px-2 text-xs text-red-700 hover:text-red-800 hover:bg-red-50 border border-red-200"
+            className={cn(
+              'h-7 px-2 text-xs border',
+              isRisky
+                ? 'text-red-700 hover:text-red-800 hover:bg-red-100 border-red-300 bg-red-50 font-medium'
+                : 'text-red-700 hover:text-red-800 hover:bg-red-50 border-red-200',
+            )}
             onClick={onBlock}
             disabled={reviewing}
             title="Block — move to trash"

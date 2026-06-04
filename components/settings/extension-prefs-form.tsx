@@ -260,10 +260,12 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
   const [overdueDays,         setOverdueDays]         = useState(String(initialPrefs.overdue_days));
 
   // Section: Interface
-  const [keyboardShortcuts,  setKeyboardShortcuts]  = useState(initialPrefs.keyboard_shortcuts);
-  const [tasksDefaultView,   setTasksDefaultView]   = useState(initialPrefs.tasks_default_view);
-  const [theme,              setTheme]              = useState(initialPrefs.theme);
-  const [snoozeDefault,      setSnoozeDefault]      = useState(initialPrefs.snooze_default);
+  const [keyboardShortcuts,   setKeyboardShortcuts]   = useState(initialPrefs.keyboard_shortcuts);
+  const [tasksDefaultView,    setTasksDefaultView]    = useState(initialPrefs.tasks_default_view);
+  const [theme,               setTheme]               = useState(initialPrefs.theme);
+  const [snoozeDefault,       setSnoozeDefault]       = useState(initialPrefs.snooze_default);
+  const [gmailFoldersEnabled, setGmailFoldersEnabled] = useState(initialPrefs.gmail_folders_enabled);
+
 
   // ── Dirty-tracking wrappers ────────────────────────────────────────────────
   // `mk(setter)` returns a new setter that also calls markDirty
@@ -309,10 +311,11 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
         followup_suggestions: followupSuggestions,
         draft_replies:        draftReplies,
         overdue_days:         Math.max(1, Math.min(90, Number(overdueDays) || 14)),
-        keyboard_shortcuts:  keyboardShortcuts,
-        tasks_default_view:  tasksDefaultView,
-        snooze_default:      snoozeDefault,
+        keyboard_shortcuts:   keyboardShortcuts,
+        tasks_default_view:   tasksDefaultView,
+        snooze_default:       snoozeDefault,
         theme,
+        gmail_folders_enabled: gmailFoldersEnabled,
       });
       setSaving(false);
       if (result?.error) {
@@ -492,6 +495,13 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
         <CardContent className="space-y-4">
           <div className="space-y-1 divide-y divide-border">
             <ToggleRow label="Keyboard shortcuts" description="J/K to navigate, R to reply, E to archive, S to snooze, and more." checked={keyboardShortcuts} onChange={mk(setKeyboardShortcuts)} disabled={disabled} />
+            <ToggleRow
+              label="Gmail folder labels"
+              description='Creates "Inbox Triage/Needs Reply" and "Inbox Triage/Internal" as folders in your Gmail sidebar. Labels sync after each triage run and when you action emails.'
+              checked={gmailFoldersEnabled}
+              onChange={mk(setGmailFoldersEnabled)}
+              disabled={disabled}
+            />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 pt-1">
@@ -586,6 +596,7 @@ export function ExtensionPrefsForm({ initialPrefs }: Props) {
                   setTasksDefaultView(initialPrefs.tasks_default_view);
                   setSnoozeDefault(initialPrefs.snooze_default);
                   setTheme(initialPrefs.theme);
+                  setGmailFoldersEnabled(initialPrefs.gmail_folders_enabled);
                   setIsDirty(false);
                   setSaveError(null);
                 }}

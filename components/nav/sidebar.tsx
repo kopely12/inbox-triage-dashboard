@@ -14,8 +14,6 @@ import {
   LogOut,
   Shield,
   CheckSquare,
-  LayoutDashboard,
-  SlidersHorizontal,
   Settings2,
   PanelLeftClose,
   PanelLeftOpen,
@@ -33,24 +31,23 @@ interface SubItem {
 }
 
 interface NavItem {
-  href:      string;
-  label:     string;
-  icon:      React.ComponentType<{ className?: string }>;
-  adminOnly: boolean;
-  subItems?: SubItem[];
+  href:          string;
+  label:         string;
+  icon:          React.ComponentType<{ className?: string }>;
+  adminOnly:     boolean;
+  subItems?:     SubItem[];
+  dividerBefore?: boolean; // renders a thin separator above this item
 }
 
 // ── Nav config ────────────────────────────────────────────────────────────────
 
 const NAV_ITEMS: NavItem[] = [
-  { href: '/',            label: 'Overview',    icon: LayoutDashboard,   adminOnly: false },
-  { href: '/analytics',   label: 'Analytics',   icon: BarChart2,         adminOnly: false },
-  { href: '/commitments', label: 'Commitments', icon: CheckSquare,       adminOnly: false },
-  { href: '/senders',              label: 'Senders',             icon: SlidersHorizontal, adminOnly: false },
-  { href: '/sender-intelligence',  label: 'Sender Intelligence', icon: Inbox,    adminOnly: false },
-  { href: '/inbox-health',         label: 'Inbox Health',        icon: Activity, adminOnly: false },
+  { href: '/',                    label: 'Inbox Health',  icon: Activity,    adminOnly: false },
+  { href: '/sender-intelligence', label: 'Inbox Cleaner', icon: Inbox,       adminOnly: false },
+  { href: '/commitments',         label: 'Commitments',   icon: CheckSquare, adminOnly: false },
+  { href: '/analytics',           label: 'Analytics',     icon: BarChart2,   adminOnly: false },
   {
-    href: '/preferences', label: 'Preferences', icon: Settings2, adminOnly: false,
+    href: '/preferences', label: 'Preferences', icon: Settings2, adminOnly: false, dividerBefore: true,
     subItems: [
       { href: '#gmail',          label: 'Gmail connection'    },
       { href: '#triage',         label: 'Triage & Scanning'   },
@@ -136,7 +133,7 @@ export function Sidebar() {
 
       {/* Nav */}
       <nav className="flex flex-col gap-0.5 p-3 flex-1 overflow-y-auto">
-        {NAV_ITEMS.map(({ href, label, icon: Icon, adminOnly, subItems }) => {
+        {NAV_ITEMS.map(({ href, label, icon: Icon, adminOnly, subItems, dividerBefore }) => {
           if (adminOnly && !isAdmin) return null;
 
           const active = pathname === href || pathname.startsWith(href + '/');
@@ -144,6 +141,7 @@ export function Sidebar() {
 
           return (
             <div key={href}>
+              {dividerBefore && <div className="my-1 border-t border-border" />}
               <Link
                 href={href}
                 title={collapsed ? label : undefined}

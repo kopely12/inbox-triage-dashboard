@@ -209,7 +209,7 @@ export function CommitmentsClient({
   const to   = Math.min(from + 50, totalCount);
 
   return (
-    <div className="max-w-4xl space-y-5">
+    <div className="space-y-5">
 
       {/* Header */}
       <div className="flex items-center justify-between">

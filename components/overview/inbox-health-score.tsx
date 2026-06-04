@@ -86,7 +86,7 @@ const SCORE_INFO = (
   <>
     <p className="font-semibold text-foreground">Overall Inbox Health</p>
     <p>A 0–100 score reflecting how well you manage inbox noise across five dimensions. Graded <strong>A+</strong> (90+) down to <strong>F</strong> (below 40).</p>
-    <p className="text-muted-foreground">Updated each time you run a Sender Intelligence analysis. Daily snapshots are stored to build the trend line.</p>
+    <p className="text-muted-foreground">Updated each time you run an Inbox Cleaner analysis. Daily snapshots are stored to build the trend line.</p>
     <div className="mt-2 pt-2 border-t border-border grid grid-cols-2 gap-x-3 gap-y-0.5 text-muted-foreground">
       <span>A+ ≥ 90</span><span>A ≥ 80</span>
       <span>B ≥ 70</span><span>C ≥ 55</span>
@@ -104,7 +104,7 @@ const COMPONENT_INFO: Record<string, React.ReactNode> = {
         <li>→ Full 25 pts when noise senders are under ~33% of total</li>
         <li>→ Drops to 0 when noise senders reach ~67%+</li>
       </ul>
-      <p className="mt-1.5 font-medium text-foreground">Improve: take action on noise senders in the Sender Intelligence tab.</p>
+      <p className="mt-1.5 font-medium text-foreground">Improve: take action on noise senders in the Inbox Cleaner tab.</p>
     </>
   ),
 
@@ -128,7 +128,7 @@ const COMPONENT_INFO: Record<string, React.ReactNode> = {
         <li>→ Full 20 pts when all unsubscribeable noise senders are unsubscribed</li>
         <li>→ 0 pts when none are (even if you delete their emails)</li>
       </ul>
-      <p className="mt-1.5 font-medium text-foreground">Improve: use Unsubscribe in Sender Intelligence — Inbox Triage sends the request automatically.</p>
+      <p className="mt-1.5 font-medium text-foreground">Improve: use Unsubscribe in Inbox Cleaner — Inbox Triage sends the request automatically.</p>
     </>
   ),
 
@@ -152,7 +152,7 @@ const COMPONENT_INFO: Record<string, React.ReactNode> = {
         <li>→ Full 15 pts when no opt-out replies are unresolved</li>
         <li>→ Loses ~3 pts per unresolved opt-out (floors at 0)</li>
       </ul>
-      <p className="mt-1.5 font-medium text-foreground">Improve: Inbox Triage detects these replies automatically. Find flagged senders in Sender Intelligence and officially unsubscribe.</p>
+      <p className="mt-1.5 font-medium text-foreground">Improve: Inbox Triage detects these replies automatically. Find flagged senders in Inbox Cleaner and officially unsubscribe.</p>
     </>
   ),
 };
@@ -382,7 +382,7 @@ export function InboxHealthScore({
   onNavigate,
 }: {
   health:     InboxHealthData;
-  onNavigate: (tab: 'senders' | 'deep_clean') => void;
+  onNavigate: (tab: 'senders' | 'deep_clean' | 'opt_outs') => void;
 }) {
   const { score, grade, components, recommendations, trend, metadata } = health;
 
@@ -390,9 +390,9 @@ export function InboxHealthScore({
     return (
       <div className="rounded-xl border border-border bg-card p-5 text-center text-sm text-muted-foreground">
         <p className="font-medium text-foreground mb-1">No inbox data yet</p>
-        <p>Run a Sender Intelligence analysis to get your first health score.</p>
+        <p>Run an Inbox Cleaner analysis to get your first health score.</p>
         <Button asChild size="sm" className="mt-3">
-          <Link href="/sender-intelligence">Go to Sender Intelligence</Link>
+          <Link href="/sender-intelligence">Go to Inbox Cleaner</Link>
         </Button>
       </div>
     );

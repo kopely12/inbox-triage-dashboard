@@ -1,26 +1,20 @@
 import { auth }         from '@/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 import { redirect }      from 'next/navigation';
-import {
-  Card, CardContent, CardDescription, CardHeader, CardTitle,
-} from '@/components/ui/card';
 
-import { ActivityChart,            type ActivityPoint }           from '@/components/analytics/activity-chart';
-import { CommitmentAgeChart,       type AgeBucket }               from '@/components/analytics/commitment-age-chart';
-import { CommitmentsSection,       type CommitmentDataset }       from '@/components/analytics/commitments-section';
-import { HabitHeatmap,             type HeatmapDay }              from '@/components/analytics/habit-heatmap';
-import { InsightsStrip,            buildInsights }                from '@/components/analytics/insights-strip';
-import { RangeToggle,              type Range }                    from '@/components/analytics/range-toggle';
-import { ResponseTimeDistribution, type RtBucket }                from '@/components/analytics/response-time-distribution';
-import { SenderTable,              type SenderRow }               from '@/components/analytics/sender-table';
-import { SurfacingRateChart,       type SurfacingPoint }          from '@/components/analytics/surfacing-rate-chart';
-import { ActionRateChart,          type ActionBreakdown }         from '@/components/analytics/action-rate-chart';
-import { ChartErrorBoundary }                                      from '@/components/analytics/chart-error-boundary';
-import type { CommitmentPoint }                                    from '@/components/analytics/commitment-chart';
-
-import { Inbox, Mail, CheckSquare, TrendingUp, Download } from 'lucide-react';
-import Link from 'next/link';
-import { Button } from '@/components/ui/button';
+import { buildInsights }                                          from '@/components/analytics/insights-strip';
+import type { Range }                                             from '@/components/analytics/range-toggle';
+import type { ActivityPoint }                                     from '@/components/analytics/activity-chart';
+import type { ActionBreakdown }                                   from '@/components/analytics/action-rate-chart';
+import type { CommitmentDataset }                                 from '@/components/analytics/commitments-section';
+import type { HeatmapDay }                                        from '@/components/analytics/habit-heatmap';
+import type { SurfacingPoint }                                    from '@/components/analytics/surfacing-rate-chart';
+import type { RtBucket }                                          from '@/components/analytics/response-time-distribution';
+import type { CommitmentPoint }                                   from '@/components/analytics/commitment-chart';
+import type { AgeBucket }                                         from '@/components/analytics/commitment-age-chart';
+import type { SenderRow }                                         from '@/components/analytics/sender-table';
+import { Card, CardContent }                                      from '@/components/ui/card';
+import { AnalyticsClient }                                        from '@/components/analytics/analytics-client';
 
 export const metadata = { title: 'Analytics — Inbox Triage' };
 
@@ -251,6 +245,7 @@ export default async function AnalyticsPage({
     { data: assignedInRangeRaw },
     { data: assignedOpenAllRaw },
     { data: assignedSenderRaw  },
+    { data: noiseSnapshotsRaw  },
   ] = await Promise.all([
     safe(supabaseAdmin
       .from('triage_sessions')
@@ -316,6 +311,15 @@ export default async function AnalyticsPage({
       .eq('user_id', userId)
       .eq('direction', 'assigned')
       .gte('scanned_at', weeksAgoISO), []),
+
+    // Noise trend — daily snapshots for the range period
+    safe(supabaseAdmin
+      .from('inbox_health_snapshots')
+      .select('noise_score, snapshot_date')
+      .eq('user_id', userId)
+      .gte('snapshot_date', weeksAgoISO.slice(0, 10))
+      .order('snapshot_date', { ascending: true })
+      .limit(52), []),
   ]);
 
   const sessions       = sessionsRaw ?? [];
@@ -325,7 +329,7 @@ export default async function AnalyticsPage({
   // ── Empty state ────────────────────────────────────────────────────────────
   if (allTimeTriages === 0) {
     return (
-      <div className="max-w-4xl space-y-6">
+      <div className="space-y-6">
         <div>
           <h2 className="text-lg font-semibold">Analytics</h2>
           <p className="text-sm text-muted-foreground">
@@ -407,9 +411,38 @@ export default async function AnalyticsPage({
   });
   const totalActioned = actionBreakdown.replied + actionBreakdown.snoozed + actionBreakdown.dismissed + actionBreakdown.pending;
 
-  // ── Response time ─────────────────────────────────────────────────────────
+  // ── Weekly signal quality trend ───────────────────────────────────────────
+  // Bucket triage_results by the week of their session to show reply/dismiss trends.
+  const sessionTriagedAt = new Map((sessionsRaw ?? []).map((s: any) => [s.id, s.triggered_at])); // eslint-disable-line @typescript-eslint/no-explicit-any
+  const signalMap = new Map(weeks.map(({ key }) => [key, { replied: 0, dismissed: 0, total: 0 }]));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sessionTriagedAt = new Map((sessionsRaw ?? []).map((s: any) => [s.id, s.triggered_at]));
+  actionResults.forEach((r: any) => {
+    const sessionTs = sessionTriagedAt.get(r.session_id);
+    if (!sessionTs) return;
+    const bucket = signalMap.get(toMondayKey(sessionTs));
+    if (!bucket) return;
+    bucket.total += 1;
+    if (r.user_action === 'replied')        bucket.replied   += 1;
+    else if (r.user_action === 'dismissed') bucket.dismissed += 1;
+  });
+  const signalQualityData: import('@/components/analytics/signal-quality-trend-chart').SignalQualityPoint[] =
+    weeks.map(({ key, label }) => {
+      const b = signalMap.get(key)!;
+      return {
+        label,
+        replyRate:   b.total >= 3 ? Math.round((b.replied   / b.total) * 100) : null,
+        dismissRate: b.total >= 3 ? Math.round((b.dismissed / b.total) * 100) : null,
+      };
+    });
+
+  // ── Noise trend ───────────────────────────────────────────────────────────
+  const noiseTrendData: import('@/components/analytics/noise-trend-chart').NoiseTrendPoint[] =
+    (noiseSnapshotsRaw ?? []).map((s: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+      date:       s.snapshot_date as string,
+      noiseScore: s.noise_score   as number,
+    }));
+
+  // ── Response time ─────────────────────────────────────────────────────────
   const allResponseHours: number[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   actionResults
@@ -479,41 +512,6 @@ export default async function AnalyticsPage({
     : null;
   const outgoingOpenCount = (outgoingOpenAllRaw ?? []).length;
 
-  const tiles = [
-    {
-      label: 'Triages',
-      value: triagesInRange.toLocaleString(),
-      sub:   `${allTimeTriages.toLocaleString()} all time`,
-      icon:  Inbox,
-      wow:   { cur: wow.thisTriages, prev: wow.lastTriages },
-    },
-    {
-      label: 'Emails scanned',
-      value: scannedInRange.toLocaleString(),
-      sub:   `${surfacedInRange.toLocaleString()} surfaced`,
-      icon:  Mail,
-      wow:   { cur: wow.thisScanned, prev: wow.lastScanned },
-    },
-    {
-      label: 'Commitments resolved',
-      value: outgoingResolved.toLocaleString(),
-      sub:   `${outgoingOpenCount} still open`,
-      icon:  CheckSquare,
-      wow:   { cur: wow.thisResolved, prev: wow.lastResolved },
-    },
-    {
-      label: 'Fulfillment rate',
-      value: fulfillmentPct !== null
-        ? `${fulfillmentPct}%`
-        : outgoingTotal > 0 ? `${outgoingResolved}/${outgoingTotal}` : '—',
-      sub: fulfillmentPct !== null
-        ? `${outgoingResolved} of ${outgoingTotal} resolved`
-        : outgoingTotal === 0 ? 'No commitments' : 'Need 5+ to show %',
-      icon: TrendingUp,
-      wow:  null,
-    },
-  ];
-
   // ── Insights ──────────────────────────────────────────────────────────────
   const insights = buildInsights({
     triageCount:   triagesInRange,
@@ -531,180 +529,32 @@ export default async function AnalyticsPage({
   });
 
   return (
-    <div className="max-w-4xl space-y-8">
-
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="text-lg font-semibold">Analytics</h2>
-          <p className="text-sm text-muted-foreground">
-            {rangeLabel} — triage, communication, and commitment data.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <Button asChild variant="ghost" size="sm" className="gap-1.5 text-muted-foreground">
-            <Link href={`/api/analytics/export?range=${validRange}`}>
-              <Download className="w-3.5 h-3.5" />
-              Export CSV
-            </Link>
-          </Button>
-          <RangeToggle current={validRange} />
-        </div>
-      </div>
-
-      {/* Insights strip */}
-      <InsightsStrip insights={insights} />
-
-      {/* Overview tiles */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {tiles.map(({ label, value, sub, icon: Icon, wow: tileWow }) => {
-          const pct = tileWow && tileWow.prev > 0
-            ? Math.round(((tileWow.cur - tileWow.prev) / tileWow.prev) * 100)
-            : null;
-          return (
-            <Card key={label}>
-              <CardContent className="pt-5">
-                <div className="flex items-start gap-3">
-                  <div className="flex items-center justify-center w-8 h-8 rounded-md bg-muted shrink-0">
-                    <Icon className="w-4 h-4 text-muted-foreground" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground leading-tight">{label}</p>
-                    <p className="text-xl font-semibold mt-1 leading-none">{value}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{sub}</p>
-                    {pct !== null && (
-                      <p className={`text-xs mt-0.5 font-medium ${pct >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500'}`}>
-                        {pct > 0 ? '+' : ''}{pct}% this week
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-
-      {/* ═══ SECTION 1: TRIAGE ACTIVITY ═══════════════════════════════════════ */}
-      <div id="triage" className="space-y-5">
-        <div className="flex items-center gap-3">
-          <h3 className="text-sm font-semibold text-foreground">Triage Activity</h3>
-          <div className="flex-1 h-px bg-border" />
-          <p className="text-xs text-muted-foreground">
-            Are you scanning enough? Is the AI surfacing the right things?
-          </p>
-        </div>
-
-        {/* Habit heatmap */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Triage habit</CardTitle>
-            <CardDescription>
-              Daily triage sessions over the last 52 weeks — fixed window, independent of the range toggle above.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ChartErrorBoundary title="Habit heatmap">
-              <HabitHeatmap days={heatmapDays} totalTriages={heatmapTotal} />
-            </ChartErrorBoundary>
-          </CardContent>
-        </Card>
-
-        {/* Activity + signal quality */}
-        <div className="grid gap-5 lg:grid-cols-2">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Email activity</CardTitle>
-              <CardDescription>Emails scanned and surfaced per week — {rangeLabel}.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ChartErrorBoundary title="Email activity">
-                <ActivityChart data={activityData} />
-              </ChartErrorBoundary>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Signal quality</CardTitle>
-              <CardDescription>
-                Of surfaced emails, what did you do with them?
-                A high dismiss rate means the AI is surfacing noise.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ChartErrorBoundary title="Signal quality">
-                <ActionRateChart data={actionBreakdown} />
-              </ChartErrorBoundary>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Surfacing rate — full width */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Surfacing rate</CardTitle>
-            <CardDescription>
-              % of scanned emails surfaced. Healthy range: 10–25%.
-              {overallAvgRate !== null && (
-                <span className={`ml-1 font-medium ${overallAvgRate > 35 ? 'text-amber-500' : overallAvgRate < 5 ? 'text-amber-500' : 'text-foreground'}`}>
-                  Avg {overallAvgRate}%
-                </span>
-              )}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ChartErrorBoundary title="Surfacing rate">
-              <SurfacingRateChart data={surfacingRateData} avgRate={overallAvgRate} />
-            </ChartErrorBoundary>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* ═══ SECTION 2: COMMUNICATION ════════════════════════════════════════ */}
-      <div id="communication" className="space-y-5">
-        <div className="flex items-center gap-3">
-          <h3 className="text-sm font-semibold text-foreground">Communication</h3>
-          <div className="flex-1 h-px bg-border" />
-          <p className="text-xs text-muted-foreground">
-            How quickly do you act on what the inbox surfaces?
-          </p>
-        </div>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Reply speed</CardTitle>
-            <CardDescription>
-              Time from email being surfaced to reply — {rangeLabel}.
-              Based on replies recorded in the extension sidebar only.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ChartErrorBoundary title="Reply speed">
-              <ResponseTimeDistribution
-                buckets={rtBuckets}
-                totalReplies={allResponseHours.length}
-                p50={p50}
-                p90={p90}
-              />
-            </ChartErrorBoundary>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* ═══ SECTION 3: COMMITMENTS ══════════════════════════════════════════ */}
-      <div id="commitments" className="space-y-5">
-        <div className="flex items-center gap-3">
-          <h3 className="text-sm font-semibold text-foreground">Commitments</h3>
-          <div className="flex-1 h-px bg-border" />
-          <p className="text-xs text-muted-foreground">
-            Are you keeping your word? Which relationships need attention?
-          </p>
-        </div>
-
-        <CommitmentsSection outgoing={outgoingDataset} assigned={assignedDataset} />
-      </div>
-
-    </div>
+    <AnalyticsClient
+      validRange={validRange}
+      rangeLabel={rangeLabel}
+      summary={{
+        triagesInRange,
+        allTimeTriages,
+        scannedInRange,
+        surfacedInRange,
+        outgoingResolved,
+        outgoingTotal,
+        outgoingOpenCount,
+        fulfillmentPct,
+        wow,
+      }}
+      insights={insights}
+      heatmapDays={heatmapDays}
+      heatmapTotal={heatmapTotal}
+      activityData={activityData}
+      signalQualityData={signalQualityData}
+      noiseTrendData={noiseTrendData}
+      rtBuckets={rtBuckets}
+      totalReplies={allResponseHours.length}
+      p50={p50}
+      p90={p90}
+      outgoingDataset={outgoingDataset}
+      assignedDataset={assignedDataset}
+    />
   );
 }

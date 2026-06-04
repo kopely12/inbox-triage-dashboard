@@ -3,12 +3,12 @@ import { supabaseAdmin }  from '@/lib/supabase';
 import { redirect }       from 'next/navigation';
 import Link               from 'next/link';
 import { Info, Download } from 'lucide-react';
-import { ExtensionPrefsForm }      from '@/components/settings/extension-prefs-form';
-import { PreferencesForm }         from '@/components/settings/preferences-form';
-import { DeleteAccountDialog }     from '@/components/settings/delete-account-dialog';
-import { GmailConnectionCard }     from '@/components/settings/gmail-connection-card';
-import { PreferencesScrollSpy }    from '@/components/settings/preferences-scroll-spy';
-import { PreferencesSearch }       from '@/components/settings/preferences-search';
+import { ExtensionPrefsForm }   from '@/components/settings/extension-prefs-form';
+import { PreferencesForm }      from '@/components/settings/preferences-form';
+import { DeleteAccountDialog }  from '@/components/settings/delete-account-dialog';
+import { GmailConnectionCard }  from '@/components/settings/gmail-connection-card';
+import { PreferencesScrollSpy } from '@/components/settings/preferences-scroll-spy';
+import { PreferencesSearch }    from '@/components/settings/preferences-search';
 import { PREFS_DEFAULTS, type ExtensionPrefs } from '@/lib/extension-prefs';
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -37,7 +37,7 @@ export default async function PreferencesPage() {
   ]);
 
   const extensionPrefs: ExtensionPrefs = { ...PREFS_DEFAULTS, ...(prefs?.prefs ?? {}) };
-  const timezone           = user?.timezone             ?? 'UTC';
+  const timezone           = user?.timezone             ?? 'America/New_York';
   const defaultSnoozeHours = user?.default_snooze_hours ?? 24;
   const gmailEmail         = user?.email  ?? session.user.email ?? '';
   const gmailName          = user?.name   ?? session.user.name  ?? null;
@@ -78,7 +78,10 @@ export default async function PreferencesPage() {
       <Card id="time" className="scroll-mt-4">
         <CardHeader className="pb-4">
           <CardTitle className="text-sm font-medium">Time &amp; reminders</CardTitle>
-          <CardDescription>Controls how the extension schedules reminders and pre-fills snooze times.</CardDescription>
+          <CardDescription>
+            Controls how the extension schedules reminders and pre-fills snooze times.
+            Your timezone is also used for bundle digest delivery.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <PreferencesForm timezone={timezone} defaultSnoozeHours={defaultSnoozeHours} />

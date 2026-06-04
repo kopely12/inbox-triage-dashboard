@@ -1,15 +1,6 @@
-import { auth }           from '@/auth';
-import { redirect }        from 'next/navigation';
-import { getInboxHealth }  from '@/app/actions/engagement';
-import { InboxHealthClient } from '@/components/inbox-health/inbox-health-client';
+// /inbox-health is now the home page — redirect to keep any bookmarked links working.
+import { redirect } from 'next/navigation';
 
-export const metadata = { title: 'Inbox Health — Inbox Triage' };
-
-export default async function InboxHealthPage() {
-  const session = await auth();
-  if (!session?.user?.id) redirect('/login');
-
-  const { health } = await getInboxHealth();
-
-  return <InboxHealthClient health={health} />;
+export default function InboxHealthRedirect() {
+  redirect('/');
 }

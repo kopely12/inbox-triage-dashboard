@@ -6,12 +6,13 @@ import { cn }      from '@/lib/utils';
 import { toast }   from 'sonner';
 import {
   Pin, EyeOff, X, ArrowUpDown, ArrowUp, ArrowDown, Search,
-  Bot, ListChecks, Info,
+  Bot, ListChecks, Info, Package,
 } from 'lucide-react';
 import { Badge }   from '@/components/ui/badge';
 import { Button }  from '@/components/ui/button';
 import { Input }   from '@/components/ui/input';
 import { pinSender, suppressSender, clearSenderRule } from '@/app/actions/senders';
+import { addSendersToBundle } from '@/app/actions/bundle';
 
 // ─── automated sender detection ───────────────────────────────────────────────
 
@@ -193,6 +194,7 @@ export function SendersTable({ rows }: { rows: FullSenderRow[] }) {
   const [localRules, setLocalRules] = useState<Map<string, 'always' | 'never' | null>>(new Map());
   const [, startTransition]         = useTransition();
   const [, startBulkTransition]     = useTransition();
+  const [bundled,    setBundled]     = useState<Set<string>>(new Set());
 
   // Effective rule for a row (local override wins)
   function effectiveRule(row: FullSenderRow): 'always' | 'never' | null {
@@ -266,6 +268,32 @@ export function SendersTable({ rows }: { rows: FullSenderRow[] }) {
       } else {
         toast.success(`Suppressed ${emails.length} sender${emails.length !== 1 ? 's' : ''}`);
         emails.forEach((e) => clearLocalRule(e));
+      }
+    });
+  }
+
+  function handleBundle(email: string) {
+    startTransition(async () => {
+      const res = await addSendersToBundle([email]);
+      if (res.error) {
+        toast.error(`Failed to bundle: ${res.error}`);
+      } else {
+        setBundled((prev) => new Set(prev).add(email));
+        toast.success('Added to bundle — emails will be held and digested daily');
+      }
+    });
+  }
+
+  function handleBulkBundle() {
+    const emails = [...selected];
+    setSelected(new Set());
+    startBulkTransition(async () => {
+      const res = await addSendersToBundle(emails);
+      if (res.error) {
+        toast.error(`Failed to bundle senders: ${res.error}`);
+      } else {
+        setBundled((prev) => { const n = new Set(prev); emails.forEach((e) => n.add(e)); return n; });
+        toast.success(`${emails.length} sender${emails.length !== 1 ? 's' : ''} added to bundle`);
       }
     });
   }
@@ -375,6 +403,14 @@ export function SendersTable({ rows }: { rows: FullSenderRow[] }) {
             onClick={handleBulkSuppress}
           >
             <EyeOff className="w-3 h-3" /> Suppress all
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 text-xs"
+            onClick={handleBulkBundle}
+          >
+            <Package className="w-3 h-3" /> Add to Bundle
           </Button>
           <Button
             size="sm"
@@ -569,6 +605,17 @@ export function SendersTable({ rows }: { rows: FullSenderRow[] }) {
                           </Link>
                         </Button>
 
+                        {!bundled.has(row.email) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleBundle(row.email)}
+                            className="h-6 px-2 text-xs gap-1 text-muted-foreground"
+                            title="Hold emails from this sender in a daily digest bundle"
+                          >
+                            <Package className="w-3 h-3" /> Bundle
+                          </Button>
+                        )}
                         {rule ? (
                           <Button
                             variant="ghost"
