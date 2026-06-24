@@ -22,10 +22,10 @@ function signalLabel(replyRate: number, dismissRate: number): {
   text: string;
   cls: string;
 } {
-  if (replyRate >= 40) return { text: 'Strong signal quality', cls: 'text-green-600 dark:text-green-400' };
-  if (replyRate >= 20) return { text: 'Moderate signal quality', cls: 'text-amber-500' };
-  if (dismissRate >= 60) return { text: 'High noise — tighten your sender rules', cls: 'text-red-500' };
-  return { text: 'Building signal', cls: 'text-muted-foreground' };
+  if (replyRate >= 40) return { text: 'Strong follow-through', cls: 'text-green-600 dark:text-green-400' };
+  if (replyRate >= 20) return { text: 'Moderate follow-through', cls: 'text-amber-500' };
+  if (dismissRate >= 60) return { text: 'Lots of dismissals — check your triage settings', cls: 'text-red-500' };
+  return { text: 'Still building momentum', cls: 'text-muted-foreground' };
 }
 
 export function ActionRateChart({ data }: { data: ActionBreakdown }) {
@@ -103,7 +103,7 @@ export function ActionRateChart({ data }: { data: ActionBreakdown }) {
 
       {/* Signal quality line */}
       <p className={cn('text-xs font-medium pt-1 border-t border-border', signal.cls)}>
-        {signal.text} — {replyRate}% reply rate across {total} surfaced emails
+        {signal.text} — {replyRate}% reply rate across {total} prioritized emails
       </p>
     </div>
   );

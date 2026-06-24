@@ -1,12 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-// Server-side admin client — never expose to browser
-export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: { autoRefreshToken: false, persistSession: false },
-});
+// Server-side admin client — never expose to browser.
+// Fallback strings are only used during Next.js build-time module analysis;
+// real requests at runtime will always have the actual env vars from Vercel.
+export const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'http://placeholder.supabase.co',
+  process.env.SUPABASE_SERVICE_ROLE_KEY ?? 'placeholder',
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
 
 export type UserRow = {
   id: string;

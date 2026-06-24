@@ -5,9 +5,10 @@ import { SenderIntelligenceClient } from '@/components/sender-intelligence/sende
 import type { FullSenderRow }       from '@/components/senders/senders-table';
 import type { OptOutSender, EmailTypeStat } from '@/app/actions/engagement';
 import type { RecentUnsubscribe }   from '@/components/sender-intelligence/sender-intelligence-client';
-import { getScreenerQueue, getSenderTypeStats } from '@/app/actions/engagement';
+import { getScreenerQueue, getSenderTypeStats, getInboxHealth } from '@/app/actions/engagement';
+import { getProtectionAlerts } from '@/app/actions/protection';
 
-export const metadata = { title: 'Inbox Cleaner — Inbox Triage' };
+export const metadata = { title: 'Tune — Inbox Triage' };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,8 @@ export default async function SenderIntelligencePage() {
     typeStatsResult,
     { data: prefsRow },
     { data: failedUnsubRaw },
+    healthResult,
+    alertsResult,
   ] = await Promise.all([
 
     // Refresh state + plan
@@ -94,7 +97,8 @@ export default async function SenderIntelligencePage() {
         updated_at,
         emails_forwarded,
         engagement_score,
-        opt_out_replied_at
+        opt_out_replied_at,
+        ai_description
       `)
       .eq('user_id', userId)
       .eq('ignored', false)
@@ -170,6 +174,10 @@ export default async function SenderIntelligencePage() {
       .eq('unsubscribe_status', 'failed')
       .order('emails_received', { ascending: false })
       .limit(50),
+
+    // Noise Score (for the Noise Score tab)
+    getInboxHealth(),
+    getProtectionAlerts(),
   ]);
 
   const refreshStatus = user?.engagement_refresh_status ?? 'never';
@@ -323,16 +331,6 @@ export default async function SenderIntelligencePage() {
     emails_received: s.emails_received,
   }));
 
-  const autoCleanPrefs = {
-    auto_clean_calendar:      (prefsRow?.prefs?.auto_clean_calendar      as boolean) ?? false,
-    auto_clean_calendar_days: (prefsRow?.prefs?.auto_clean_calendar_days as number)  ?? 7,
-    auto_clean_otp:           (prefsRow?.prefs?.auto_clean_otp           as boolean) ?? false,
-    auto_clean_promo:         (prefsRow?.prefs?.auto_clean_promo         as boolean) ?? false,
-    auto_clean_promo_days:    (prefsRow?.prefs?.auto_clean_promo_days    as number)  ?? 60,
-    auto_clean_shipping:      (prefsRow?.prefs?.auto_clean_shipping      as boolean) ?? false,
-    auto_clean_social:        (prefsRow?.prefs?.auto_clean_social        as boolean) ?? false,
-  };
-
   return (
     <SenderIntelligenceClient
       senders={rows}
@@ -350,8 +348,9 @@ export default async function SenderIntelligencePage() {
       typeStatsBySender={typeStatsResult.typeStatsBySender ?? {}}
       triageBySender={triageBySender}
       userDomain={userDomain}
-      autoCleanPrefs={autoCleanPrefs}
       failedUnsubscribes={(failedUnsubRaw ?? []) as import('@/components/sender-intelligence/sender-intelligence-client').FailedUnsub[]}
+      health={healthResult.health ?? null}
+      initialAlerts={alertsResult.alerts ?? []}
     />
   );
 }

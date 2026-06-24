@@ -4,13 +4,12 @@ import { useEffect } from 'react';
 
 const SECTION_IDS = [
   'gmail',
-  'triage',
-  'email-scanning',
-  'sender-rules',
+  'schedule',
   'ai-context',
+  'triage',
+  'sender-rules',
   'tasks',
   'interface',
-  'time',
   'account',
 ];
 

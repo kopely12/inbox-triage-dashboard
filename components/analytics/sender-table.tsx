@@ -1,3 +1,6 @@
+'use client';
+
+import { useSession } from 'next-auth/react';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 
@@ -42,6 +45,9 @@ function relativeDate(isoDate: string | null): string {
 }
 
 export function SenderTable({ senders }: { senders: SenderRow[] }) {
+  const { data: session } = useSession();
+  const gmailAcct = session?.user?.email ? encodeURIComponent(session.user.email) : '0';
+
   if (senders.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-48 gap-2 text-center px-6">
@@ -53,8 +59,6 @@ export function SenderTable({ senders }: { senders: SenderRow[] }) {
     );
   }
 
-  const maxOpen = Math.max(...senders.map((s) => s.open), 1);
-
   return (
     <div className="space-y-3">
       <div className="overflow-x-auto">
@@ -64,14 +68,13 @@ export function SenderTable({ senders }: { senders: SenderRow[] }) {
               <th className="pb-2 text-left font-medium">Sender</th>
               <th className="pb-2 text-right font-medium w-14">Open</th>
               <th className="pb-2 text-right font-medium w-12">Done</th>
-              <th className="pb-2 pl-3 text-left font-medium w-20">Load</th>
               <th className="pb-2 text-right font-medium w-20">Last seen</th>
             </tr>
           </thead>
           <tbody>
             {senders.map((row) => {
               const trend    = TREND_ICON[row.trend];
-              const gmailUrl = `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(`from:${row.email}`)}`;
+              const gmailUrl = `https://mail.google.com/mail/u/${gmailAcct}/#search/${encodeURIComponent(`from:${row.email}`)}`;
 
               return (
                 <tr key={row.email} className="border-b last:border-0 group">
@@ -115,21 +118,6 @@ export function SenderTable({ senders }: { senders: SenderRow[] }) {
 
                   {/* Done */}
                   <td className="py-2 text-right tabular-nums text-muted-foreground">{row.done}</td>
-
-                  {/* Open load bar */}
-                  <td className="py-2 pl-3">
-                    <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                      <div
-                        className={cn(
-                          'h-full rounded-full',
-                          row.health === 'red'    ? 'bg-red-500'   :
-                          row.health === 'yellow' ? 'bg-amber-400' :
-                          'bg-chart-2',
-                        )}
-                        style={{ width: `${Math.round((row.open / maxOpen) * 100)}%` }}
-                      />
-                    </div>
-                  </td>
 
                   {/* Last seen */}
                   <td className="py-2 text-right text-xs text-muted-foreground tabular-nums">

@@ -22,7 +22,7 @@ export type AutopilotRule = {
 
 export type AutopilotRuleMeta = {
   label:            string;
-  description:      string;
+  description:      (threshold: Record<string, number>) => string;
   defaultThreshold: Record<string, number>;
   defaultAction:    AutopilotAction;
   thresholdLabel:   string;
@@ -34,7 +34,7 @@ export type AutopilotRuleMeta = {
 export const AUTOPILOT_RULE_META: Record<AutopilotRuleType, AutopilotRuleMeta> = {
   delete_without_open: {
     label:            'Auto-unsubscribe from ignored senders',
-    description:      'Automatically unsubscribes when you delete emails from a sender without ever opening one — the clearest possible signal you want out.',
+    description:      (t) => `Unsubscribes when you delete ${t.count ?? 5}+ emails from the same sender without ever opening one — the clearest possible signal you want out.`,
     defaultThreshold: { count: 5 },
     defaultAction:    'unsubscribe',
     thresholdLabel:   'Minimum deletes without opening',
@@ -44,7 +44,7 @@ export const AUTOPILOT_RULE_META: Record<AutopilotRuleType, AutopilotRuleMeta> =
   },
   low_engagement_archive: {
     label:            'Auto-archive very low engagement senders',
-    description:      'Auto-archives senders where your engagement rate falls below a threshold — keeps them out of your inbox without unsubscribing.',
+    description:      (t) => `Archives senders with an open rate below ${t.rate ?? 3}% (requires at least ${t.min_emails ?? 10} emails from them) — future emails skip your inbox without unsubscribing.`,
     defaultThreshold: { rate: 3, min_emails: 10 },
     defaultAction:    'auto_archive',
     thresholdLabel:   'Max engagement rate (%)',
@@ -54,7 +54,7 @@ export const AUTOPILOT_RULE_META: Record<AutopilotRuleType, AutopilotRuleMeta> =
   },
   never_replied_after_n_emails: {
     label:            'Unsubscribe if you\'ve never replied',
-    description:      'Automatically unsubscribes from senders who\'ve sent many emails but you\'ve never once replied — a strong signal you don\'t value the relationship.',
+    description:      (t) => `Unsubscribes from senders who've sent ${t.count ?? 10}+ emails but you've never replied once. Only applies to senders you Never or Rarely open — transactional and high-engagement senders are excluded.`,
     defaultThreshold: { count: 10 },
     defaultAction:    'unsubscribe',
     thresholdLabel:   'Minimum emails without a reply',
@@ -64,7 +64,7 @@ export const AUTOPILOT_RULE_META: Record<AutopilotRuleType, AutopilotRuleMeta> =
   },
   frequency_spike_unsubscribe: {
     label:            'Unsubscribe from high-frequency noise senders',
-    description:      'Auto-unsubscribes noise senders (Never Open / Rarely Open) who email more than a set number of times per day on average.',
+    description:      (t) => `Unsubscribes noise senders (Never/Rarely Open) who average more than ${t.daily_rate ?? 1} email${(t.daily_rate ?? 1) !== 1 ? 's' : ''} per day over your 90-day analysis window.`,
     defaultThreshold: { daily_rate: 1 },
     defaultAction:    'unsubscribe',
     thresholdLabel:   'Max emails per day (avg)',
@@ -74,10 +74,10 @@ export const AUTOPILOT_RULE_META: Record<AutopilotRuleType, AutopilotRuleMeta> =
   },
   lapsed_engagement_unsubscribe: {
     label:            'Unsubscribe from lapsed senders',
-    description:      'Auto-unsubscribes from senders you used to engage with but have stopped opening in the last 30 days — clears out newsletters you\'ve grown out of.',
+    description:      (t) => `Unsubscribes from senders you used to open at least ${t.min_prior_rate ?? 20}% of the time but haven't engaged with in the last 30 days. Raise the threshold to target only your once-favorite senders.`,
     defaultThreshold: { min_prior_rate: 20 },
     defaultAction:    'unsubscribe',
-    thresholdLabel:   'Minimum prior engagement rate (%)',
+    thresholdLabel:   'Minimum prior open rate (%) to qualify',
     thresholdKey:     'min_prior_rate',
     thresholdMin:     10,
     thresholdMax:     60,

@@ -6,10 +6,14 @@ import { Button } from '@/components/ui/button';
 import { LogOut } from 'lucide-react';
 
 const TITLES: Record<string, string> = {
-  '/account':  'Account',
-  '/billing':  'Billing',
-  '/team':     'Team',
-  '/settings': 'Settings',
+  '/':                    'Overview',
+  '/account':             'Account',
+  '/billing':             'Billing',
+  '/team':                'Team',
+  '/settings':            'Settings',
+  '/preferences':         'Settings',
+  '/sender-intelligence': 'Tune',
+  '/track':               'Track',
 };
 
 export function Header() {

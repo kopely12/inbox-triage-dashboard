@@ -132,6 +132,40 @@ function validatePrefsPartial(partial: Partial<ExtensionPrefs>): string | null {
 // ── Server action ─────────────────────────────────────────────────────────────
 
 /** Merge partial prefs into the user's saved prefs row in Supabase. */
+export async function getAutoCleanPrefs(): Promise<{
+  auto_clean_calendar:      boolean;
+  auto_clean_calendar_days: number;
+  auto_clean_otp:           boolean;
+  auto_clean_promo:         boolean;
+  auto_clean_promo_days:    number;
+  auto_clean_shipping:      boolean;
+  auto_clean_social:        boolean;
+}> {
+  const session = await auth();
+  const userId  = session?.user?.id;
+  const defaults = {
+    auto_clean_calendar: false, auto_clean_calendar_days: 7,
+    auto_clean_otp: false, auto_clean_promo: false, auto_clean_promo_days: 60,
+    auto_clean_shipping: false, auto_clean_social: false,
+  };
+  if (!userId) return defaults;
+  const { data } = await supabaseAdmin
+    .from('user_preferences')
+    .select('prefs')
+    .eq('user_id', userId)
+    .maybeSingle();
+  const p = data?.prefs ?? {};
+  return {
+    auto_clean_calendar:      (p.auto_clean_calendar      as boolean) ?? false,
+    auto_clean_calendar_days: (p.auto_clean_calendar_days as number)  ?? 7,
+    auto_clean_otp:           (p.auto_clean_otp           as boolean) ?? false,
+    auto_clean_promo:         (p.auto_clean_promo         as boolean) ?? false,
+    auto_clean_promo_days:    (p.auto_clean_promo_days    as number)  ?? 60,
+    auto_clean_shipping:      (p.auto_clean_shipping      as boolean) ?? false,
+    auto_clean_social:        (p.auto_clean_social        as boolean) ?? false,
+  };
+}
+
 export async function saveExtensionPrefs(
   partial: Partial<ExtensionPrefs>,
 ): Promise<{ error?: string; success?: boolean }> {
@@ -175,5 +209,49 @@ export async function saveExtensionPrefs(
   }
 
   revalidatePath('/preferences');
+  return { success: true };
+}
+
+/** Upsert keyboard-binding overrides into the kb_bindings column. */
+export async function saveKbBindings(
+  bindings: Record<string, string>,
+): Promise<{ error?: string; success?: boolean }> {
+  const session = await auth();
+  if (!session?.user?.id) return { error: 'Unauthenticated' };
+
+  for (const [action, key] of Object.entries(bindings)) {
+    if (typeof key !== 'string' || key.length !== 1)
+      return { error: `Invalid binding for "${action}": must be a single character` };
+  }
+
+  const { error } = await supabaseAdmin
+    .from('user_preferences')
+    .upsert(
+      { user_id: session.user.id, kb_bindings: bindings, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' },
+    );
+
+  if (error) return { error: `DB error: ${error.message}` };
+
+  revalidatePath('/preferences');
+  return { success: true };
+}
+
+/** Toggle draft queue on/off for the user's draft_queue_settings row. */
+export async function saveDraftQueueEnabled(
+  enabled: boolean,
+): Promise<{ error?: string; success?: boolean }> {
+  const session = await auth();
+  if (!session?.user?.id) return { error: 'Unauthenticated' };
+
+  const { error } = await supabaseAdmin
+    .from('draft_queue_settings')
+    .upsert(
+      { user_id: session.user.id, enabled, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' },
+    );
+
+  if (error) return { error: `DB error: ${error.message}` };
+
   return { success: true };
 }

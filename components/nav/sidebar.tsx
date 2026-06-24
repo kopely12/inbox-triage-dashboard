@@ -6,9 +6,7 @@ import { usePathname }             from 'next/navigation';
 import { useSession, signOut }     from 'next-auth/react';
 import { cn }                      from '@/lib/utils';
 import {
-  CreditCard,
   Users,
-  Mail,
   ChevronRight,
   BarChart2,
   LogOut,
@@ -31,37 +29,24 @@ interface SubItem {
 }
 
 interface NavItem {
-  href:          string;
-  label:         string;
-  icon:          React.ComponentType<{ className?: string }>;
-  adminOnly:     boolean;
-  subItems?:     SubItem[];
-  dividerBefore?: boolean; // renders a thin separator above this item
+  href:           string;
+  label:          string;
+  icon:           React.ComponentType<{ className?: string }>;
+  adminOnly:      boolean;
+  teamOnly?:      boolean; // only shown to team plan admins/owners
+  subItems?:      SubItem[];
+  dividerBefore?: boolean;
 }
 
 // ── Nav config ────────────────────────────────────────────────────────────────
 
 const NAV_ITEMS: NavItem[] = [
-  { href: '/',                    label: 'Inbox Health',  icon: Activity,    adminOnly: false },
-  { href: '/sender-intelligence', label: 'Inbox Cleaner', icon: Inbox,       adminOnly: false },
-  { href: '/commitments',         label: 'Commitments',   icon: CheckSquare, adminOnly: false },
+  { href: '/',                    label: 'Overview',  icon: Activity,    adminOnly: false },
+  { href: '/sender-intelligence', label: 'Tune',         icon: Inbox,       adminOnly: false },
+  { href: '/track',               label: 'Track',         icon: CheckSquare, adminOnly: false },
   { href: '/analytics',           label: 'Analytics',     icon: BarChart2,   adminOnly: false },
-  {
-    href: '/preferences', label: 'Preferences', icon: Settings2, adminOnly: false, dividerBefore: true,
-    subItems: [
-      { href: '#gmail',          label: 'Gmail connection'    },
-      { href: '#triage',         label: 'Triage & Scanning'   },
-      { href: '#email-scanning', label: 'Email scanning'      },
-      { href: '#sender-rules',   label: 'Sender rules'        },
-      { href: '#ai-context',     label: 'AI & context'        },
-      { href: '#tasks',          label: 'Tasks & commitments' },
-      { href: '#interface',      label: 'Interface'           },
-      { href: '#time',           label: 'Time & reminders'    },
-      { href: '#account',        label: 'Account'             },
-    ],
-  },
-  { href: '/billing', label: 'Billing', icon: CreditCard, adminOnly: false },
-  { href: '/team',    label: 'Team',    icon: Users,       adminOnly: true  },
+  { href: '/preferences', label: 'Settings', icon: Settings2, adminOnly: false, dividerBefore: true },
+  { href: '/team',    label: 'Team',    icon: Users,       adminOnly: true, teamOnly: true },
 ];
 
 // ── useHash hook ──────────────────────────────────────────────────────────────
@@ -86,13 +71,13 @@ export function Sidebar() {
   const { data: session }    = useSession();
   const hash                 = useHash();
 
-  // Collapse state — persisted to localStorage
-  const [collapsed, setCollapsed] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('sidebar-collapsed') === 'true';
-    }
-    return false;
-  });
+  // Collapse state — persisted to localStorage.
+  // Must initialize to false on both server and client to avoid hydration mismatch;
+  // the real stored value is read in useEffect after mount.
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    if (localStorage.getItem('sidebar-collapsed') === 'true') setCollapsed(true);
+  }, []);
 
   // Overdue badge count — lightweight fetch, non-blocking
   const [overdueCount, setOverdueCount] = useState(0);
@@ -114,6 +99,7 @@ export function Sidebar() {
   const name         = session?.user?.name ?? session?.user?.email ?? '—';
   const initials     = name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
   const plan         = session?.user?.planTier ?? 'free';
+  const isTeamAdmin  = plan === 'team' && isAdmin;
 
   return (
     <aside className={cn(
@@ -122,22 +108,27 @@ export function Sidebar() {
     )}>
       {/* Logo */}
       <div className={cn(
-        'flex items-center gap-2.5 border-b border-border',
-        collapsed ? 'px-3 py-5 justify-center' : 'px-5 py-5',
+        'flex items-center border-b border-border',
+        collapsed ? 'px-3 py-3 justify-center' : 'px-5 py-3',
       )}>
-        <div className="flex items-center justify-center w-8 h-8 rounded-md bg-primary shrink-0">
-          <Mail className="w-4 h-4 text-primary-foreground" />
-        </div>
-        {!collapsed && <span className="font-semibold text-sm tracking-tight">Inbox Triage</span>}
+        {collapsed ? (
+          /* Collapsed: clip to icon portion (paper plane on left side of wordmark) */
+          <div style={{ width: 40, height: 40, overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
+            <img src="/logo.png" alt="Triago" style={{ height: 40, width: 'auto', maxWidth: 'none', flexShrink: 0 }} />
+          </div>
+        ) : (
+          <img src="/logo.png" alt="Triago" style={{ height: 40, width: 'auto' }} />
+        )}
       </div>
 
       {/* Nav */}
       <nav className="flex flex-col gap-0.5 p-3 flex-1 overflow-y-auto">
-        {NAV_ITEMS.map(({ href, label, icon: Icon, adminOnly, subItems, dividerBefore }) => {
-          if (adminOnly && !isAdmin) return null;
+        {NAV_ITEMS.map(({ href, label, icon: Icon, adminOnly, teamOnly, subItems, dividerBefore }) => {
+          if (adminOnly && !isAdmin)   return null;
+          if (teamOnly  && !isTeamAdmin) return null;
 
           const active = pathname === href || pathname.startsWith(href + '/');
-          const showOverdueBadge = href === '/commitments' && overdueCount > 0;
+          const showOverdueBadge = href === '/track' && overdueCount > 0;
 
           return (
             <div key={href}>

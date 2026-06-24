@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useTransition } from 'react';
+import { useSession } from 'next-auth/react';
 import Link        from 'next/link';
 import { cn }      from '@/lib/utils';
 import { toast }   from 'sonner';
@@ -185,6 +186,9 @@ function FilterChips({
 // ─── main component ───────────────────────────────────────────────────────────
 
 export function SendersTable({ rows }: { rows: FullSenderRow[] }) {
+  const { data: session } = useSession();
+  const gmailAcct = session?.user?.email ? encodeURIComponent(session.user.email) : '0';
+
   const [query,      setQuery]      = useState('');
   const [sortKey,    setSortKey]    = useState<SortKey>('health');
   const [sortDir,    setSortDir]    = useState<SortDir>('asc');
@@ -474,7 +478,7 @@ export function SendersTable({ rows }: { rows: FullSenderRow[] }) {
             ) : (
               sorted.map((row) => {
                 const rule     = effectiveRule(row);
-                const gmailUrl = `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(`from:${row.email}`)}`;
+                const gmailUrl = `https://mail.google.com/mail/u/${gmailAcct}/#search/${encodeURIComponent(`from:${row.email}`)}`;
                 const totalInteractions = row.replyCount + row.dismissCount;
                 const isAuto   = isAutomatedSender(row.email);
 
@@ -600,7 +604,7 @@ export function SendersTable({ rows }: { rows: FullSenderRow[] }) {
                           className="h-6 px-2 text-xs gap-1 text-muted-foreground"
                           title="View commitments for this sender"
                         >
-                          <Link href={`/commitments?q=${encodeURIComponent(row.email)}`}>
+                          <Link href={`/track?q=${encodeURIComponent(row.email)}`}>
                             <ListChecks className="w-3 h-3" /> History
                           </Link>
                         </Button>

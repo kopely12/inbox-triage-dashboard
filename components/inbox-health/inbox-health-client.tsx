@@ -15,27 +15,14 @@ import { cn } from '@/lib/utils';
 import {
   TrendingUp, TrendingDown, Minus, ArrowRight,
   Activity, Target, Zap, Trophy,
-  BarChart3, CheckCircle2, AlertTriangle, X, Timer, ShieldAlert, ChevronDown,
+  BarChart3, CheckCircle2, AlertTriangle, X, ShieldAlert, ChevronDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge }  from '@/components/ui/badge';
 import { getMilestone, dismissMilestone } from '@/app/actions/engagement';
 import type { InboxHealthData, InboxHealthTrendPoint, PendingMilestone } from '@/app/actions/engagement';
 import type { InboxAlert } from '@/app/actions/protection';
 import { InboxProtectionAlerts } from '@/components/inbox-health/inbox-protection-alerts';
 import { InfoPopover } from '@/components/overview/inbox-health-score';
-import { NoiseBriefingCard } from '@/components/inbox-health/noise-briefing-card';
-
-// ── CommitmentSummary — passed from the server page ───────────────────────────
-
-export interface CommitmentSummary {
-  overdue:          number;
-  dueThisWeek:      number;
-  resolvedThisWeek: number;
-  extensionLabel:   string;
-  extensionVariant: 'default' | 'secondary' | 'destructive' | 'outline';
-  extensionDetail:  string;
-}
 
 // ── KPI explanations ──────────────────────────────────────────────────────────
 
@@ -139,13 +126,6 @@ const STAT_INFO = {
 type Tab        = 'breakdown' | 'recommendations' | 'alerts';
 type DateRange  = '30d' | '90d' | 'all';
 
-const CATEGORY_META: Record<string, { label: string; color: string; fill: string }> = {
-  never_engage:  { label: 'Never Open',    color: '#ef4444', fill: 'bg-red-500'    },
-  rarely_engage: { label: 'Rarely Open',   color: '#f59e0b', fill: 'bg-amber-500'  },
-  regular:       { label: 'Regular',       color: '#3b82f6', fill: 'bg-blue-500'   },
-  known_contact: { label: 'Known Contact', color: '#22c55e', fill: 'bg-green-500'  },
-  transactional: { label: 'Transactional', color: '#8b5cf6', fill: 'bg-violet-500' },
-};
 
 const COMPONENT_LINES = [
   { key: 'noise_score',        label: 'Noise ratio',       color: '#ef4444' },
@@ -154,6 +134,24 @@ const COMPONENT_LINES = [
   { key: 'recency_score',      label: 'Recent activity',   color: '#22c55e' },
   { key: 'reply_debt_score',   label: 'Ignored opt-outs',  color: '#8b5cf6' },
 ];
+
+// NOTE: The inbox health score (0–100) is computed entirely server-side in
+// app/actions/engagement.ts by summing five weighted component scores.
+// The current formula is linear within each component (e.g. noise_ratio maps
+// 0–67%+ noise linearly to 0–25 pts). A sigmoid normalization would make early
+// gains feel more rewarding — e.g. going from 0→30% reply rate feels the same
+// as 30→60% on a linear scale, but a sigmoid would give the first 30% more pts.
+// If a sigmoid is ever applied server-side, use this helper as a reference:
+//
+//   function sigmoidScore(raw: number): number {
+//     // raw is 0–1; output is 0–100
+//     const x = raw * 12 - 6; // map [0,1] → [-6,6]
+//     return Math.round(100 / (1 + Math.exp(-x)));
+//   }
+//
+// For now, no normalization is applied client-side — the server value is
+// displayed as-is. A sigmoid would need to be adopted server-side to keep
+// the KPI consistent across the dashboard and the trend chart.
 
 function scoreColor(s: number) {
   if (s >= 70) return { stroke: '#22c55e', text: 'text-green-600', bg: 'bg-green-50',  border: 'border-green-200', area: '#22c55e' };
@@ -222,6 +220,7 @@ function ScoreRingLarge({ score }: { score: number }) {
     </div>
   );
 }
+
 
 // ── Component tip ─────────────────────────────────────────────────────────────
 
@@ -330,83 +329,6 @@ function StreakBadge({ streak }: { streak: number }) {
       <Trophy className="w-3 h-3" />
       {streak}-day B+ streak
     </span>
-  );
-}
-
-// ── Distribution donut ────────────────────────────────────────────────────────
-
-function DistributionDonut({
-  categoryCounts, emailCountsByCategory,
-}: {
-  categoryCounts:          Record<string, number>;
-  emailCountsByCategory:   Record<string, number>;
-}) {
-  const [view, setView] = useState<'senders' | 'emails'>('emails');
-  const data = Object.entries(view === 'senders' ? categoryCounts : emailCountsByCategory)
-    .filter(([, v]) => v > 0)
-    .map(([k, v]) => ({ name: k, value: v, meta: CATEGORY_META[k] ?? { label: k, color: '#94a3b8', fill: 'bg-slate-400' } }));
-
-  const total = data.reduce((s, d) => s + d.value, 0);
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h4 className="text-sm font-medium">Sender distribution</h4>
-        <div className="flex rounded-md overflow-hidden border border-border text-xs">
-          {(['emails', 'senders'] as const).map((v) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              className={cn('px-2 py-0.5 transition-colors',
-                view === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
-              )}
-            >
-              {v === 'emails' ? 'By volume' : 'By count'}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex items-center gap-4">
-        <div className="shrink-0">
-          <ResponsiveContainer width={140} height={140}>
-            <PieChart>
-              <Pie data={data} cx="50%" cy="50%" innerRadius={42} outerRadius={66}
-                dataKey="value" stroke="none" paddingAngle={2}>
-                {data.map((entry) => (
-                  <Cell key={entry.name} fill={entry.meta.color} />
-                ))}
-              </Pie>
-              <Tooltip
-                formatter={(value, name) => {
-                const v = Number(value);
-                const label = typeof name === 'string' ? (CATEGORY_META[name]?.label ?? name) : String(name);
-                return [
-                  view === 'emails'
-                    ? `${v.toLocaleString()} emails (${Math.round((v / total) * 100)}%)`
-                    : `${v} senders (${Math.round((v / total) * 100)}%)`,
-                  label,
-                ] as [string, string];
-              }}
-                contentStyle={{ fontSize: 12 }}
-              />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="flex flex-col gap-1.5 flex-1 min-w-0">
-          {data.map((d) => (
-            <div key={d.name} className="flex items-center gap-2 text-xs">
-              <span className={cn('w-2.5 h-2.5 rounded-full shrink-0', d.meta.fill)} />
-              <span className="flex-1 truncate text-muted-foreground">{d.meta.label}</span>
-              <span className="tabular-nums font-medium">
-                {Math.round((d.value / total) * 100)}%
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -570,63 +492,6 @@ function Sparkline({ values, color, max }: { values: number[]; color: string; ma
   );
 }
 
-// ── Component sparklines panel ────────────────────────────────────────────────
-
-function ComponentSparklines({
-  trend,
-  components,
-}: {
-  trend:      InboxHealthTrendPoint[];
-  components: InboxHealthData['components'];
-}) {
-  const cutoff = Date.now() - 30 * 86_400_000;
-  const recent = trend
-    .filter((p) => new Date(p.snapshot_date + 'T00:00:00').getTime() >= cutoff)
-    .slice(-30);
-
-  if (recent.length < 2) {
-    return (
-      <div className="flex flex-col items-center justify-center h-28 gap-2 text-center text-muted-foreground">
-        <BarChart3 className="w-6 h-6 opacity-30" />
-        <p className="text-xs">Not enough history yet — check back after a few more scans.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-1">
-      {COMPONENT_LINES.map(({ key, label, color }) => {
-        const values = recent.map((p) => ((p as unknown) as Record<string, number>)[key] ?? 0);
-        const first  = values[0];
-        const last   = values[values.length - 1];
-        const delta  = Math.round(last - first);
-        const comp   = Object.values(components ?? {}).find((c) => c.label === label);
-        const max    = comp?.max ?? 25;
-
-        return (
-          <div key={key} className="flex items-center gap-3 py-1.5 border-b border-border last:border-0">
-            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
-            <span className="text-xs font-medium w-32 shrink-0 truncate">{label}</span>
-            <Sparkline values={values} color={color} max={max} />
-            <span className="text-xs tabular-nums text-muted-foreground w-9 text-right shrink-0">
-              {last}/{max}
-            </span>
-            <span className={cn(
-              'text-xs tabular-nums w-7 text-right shrink-0 font-medium',
-              delta > 0 ? 'text-green-600' : delta < 0 ? 'text-red-500' : 'text-muted-foreground/40',
-            )}>
-              {delta > 0 ? `+${delta}` : delta === 0 ? '—' : delta}
-            </span>
-          </div>
-        );
-      })}
-      <p className="text-xs text-muted-foreground pt-2">
-        30-day trend · delta vs. period start
-      </p>
-    </div>
-  );
-}
-
 function RecommendationsPanel({
   recommendations, score,
 }: {
@@ -740,6 +605,8 @@ function RecommendationsPanel({
                   </span>
                 </div>
                 {/* CTA */}
+                {/* TODO: pass the current sender-intelligence filter as a query param
+                    when available, so the user lands on the right category view. */}
                 <Link
                   href={
                     rec.action === 'opt_outs'   ? '/sender-intelligence?tab=opt_outs' :
@@ -773,21 +640,38 @@ function RecommendationsPanel({
 
 export function InboxHealthClient({
   health,
-  commitmentSummary,
   initialAlerts = [],
+  hideHeader = false,
 }: {
-  health:             InboxHealthData | null;
-  commitmentSummary?: CommitmentSummary;
-  initialAlerts?:     InboxAlert[];
+  health:         InboxHealthData | null;
+  initialAlerts?: InboxAlert[];
+  hideHeader?:    boolean;
 }) {
   const [activeTab,      setActiveTab]      = useState<Tab>('recommendations');
   const [milestone,      setMilestone]      = useState<PendingMilestone | null>(null);
   const [alertDismissed, setAlertDismissed] = useState(false);
+  const [dismissing,     setDismissing]     = useState(false);
 
-  // Fetch pending milestone on mount
+  // Fetch pending milestone on mount.
+  // The cancelled flag prevents a stale response from a previous effect invocation
+  // (e.g. React StrictMode double-invoke or fast re-mount) from overwriting state.
   useEffect(() => {
-    getMilestone().then(({ milestone: m }) => { if (m) setMilestone(m); });
+    let cancelled = false;
+    getMilestone().then(({ milestone: m }) => {
+      if (!cancelled && m) setMilestone(m);
+    });
+    return () => { cancelled = true; };
   }, []);
+
+  // Dismiss milestone dialog on Escape keypress
+  useEffect(() => {
+    if (!milestone) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') handleDismissMilestone();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [milestone]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Restore score-drop alert dismissed state from localStorage
   useEffect(() => {
@@ -804,8 +688,11 @@ export function InboxHealthClient({
   }
 
   async function handleDismissMilestone() {
+    if (dismissing) return;
+    setDismissing(true);
     await dismissMilestone();
     setMilestone(null);
+    setDismissing(false);
   }
 
   if (!health || health.score === null || !health.components) {
@@ -828,9 +715,9 @@ export function InboxHealthClient({
   const col = scoreColor(score);
 
   const tabs: Array<{ id: Tab; label: string; icon: React.ReactNode }> = [
-    { id: 'recommendations', label: 'Recommendations', icon: <Target className="w-4 h-4" />       },
-    { id: 'breakdown',       label: 'Breakdown',       icon: <BarChart3 className="w-4 h-4" />    },
-    { id: 'alerts',          label: 'Alerts',          icon: <ShieldAlert className="w-4 h-4" /> },
+    { id: 'recommendations', label: 'Actions',    icon: <Target className="w-4 h-4" />       },
+    { id: 'breakdown',       label: 'Breakdown',  icon: <BarChart3 className="w-4 h-4" />    },
+    { id: 'alerts',          label: 'Alerts',     icon: <ShieldAlert className="w-4 h-4" /> },
   ];
 
   const showDropAlert = !alertDismissed && metadata.delta !== null && metadata.delta <= -10;
@@ -882,57 +769,15 @@ export function InboxHealthClient({
       </div>
     )}
 
-    <div className="max-w-5xl mx-auto space-y-6">
-      {/* ── Commitment bar ── */}
-      {commitmentSummary && (commitmentSummary.overdue > 0 || commitmentSummary.dueThisWeek > 0 || commitmentSummary.resolvedThisWeek > 0) && (
-        <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-muted/50 border border-border text-sm flex-wrap">
-          {/* Extension status */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <Zap className="w-3.5 h-3.5 text-muted-foreground" />
-            <Badge variant={commitmentSummary.extensionVariant} className="text-[10px] py-0">
-              {commitmentSummary.extensionLabel}
-            </Badge>
-            <span className="text-xs text-muted-foreground hidden sm:inline">
-              {commitmentSummary.extensionDetail}
-            </span>
-          </div>
+    <div className="max-w-5xl space-y-6">
 
-          <div className="w-px h-4 bg-border hidden sm:block shrink-0" />
-
-          {/* Commitment counts */}
-          <div className="flex items-center gap-4 text-xs flex-1 flex-wrap">
-            {commitmentSummary.overdue > 0 && (
-              <Link
-                href="/commitments?status=overdue"
-                className="flex items-center gap-1 text-red-600 dark:text-red-400 hover:underline font-medium"
-              >
-                <AlertTriangle className="w-3 h-3" />
-                {commitmentSummary.overdue} overdue
-              </Link>
-            )}
-            {commitmentSummary.dueThisWeek > 0 && (
-              <Link
-                href="/commitments?status=open&sort=due"
-                className="flex items-center gap-1 text-amber-600 dark:text-amber-400 hover:underline"
-              >
-                <Timer className="w-3 h-3" />
-                {commitmentSummary.dueThisWeek} due this week
-              </Link>
-            )}
-            {commitmentSummary.resolvedThisWeek > 0 && (
-              <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
-                <CheckCircle2 className="w-3 h-3" />
-                {commitmentSummary.resolvedThisWeek} resolved this week
-              </span>
-            )}
-          </div>
-
-          <Link
-            href="/commitments"
-            className="flex items-center gap-1 text-xs text-primary hover:underline shrink-0"
-          >
-            View all <ArrowRight className="w-3 h-3" />
-          </Link>
+      {/* ── Page header ── */}
+      {!hideHeader && (
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Inbox Health</h1>
+          <p className="text-muted-foreground text-sm mt-0.5">
+            A holistic view of how well your inbox noise is managed.
+          </p>
         </div>
       )}
 
@@ -960,52 +805,8 @@ export function InboxHealthClient({
         </div>
       )}
 
-      {/* ── Page header ── */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            Inbox Health
-          </h1>
-          <p className="text-muted-foreground text-sm mt-0.5">
-            A holistic view of how well your inbox noise is managed.
-          </p>
-        </div>
-        <Button variant="outline" asChild size="sm">
-          <Link href="/sender-intelligence">
-            Open Inbox Cleaner
-            <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
-          </Link>
-        </Button>
-      </div>
-
-      {/* ── "Senders who won't stop" callout — shown when still-sending senders exist ── */}
-      {metadata.still_sending_count > 0 && (
-        <div className="rounded-xl border border-red-200 bg-red-50/70 dark:border-red-800 dark:bg-red-950/30 px-4 py-3.5 flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-start gap-3">
-            <ShieldAlert className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
-            <div>
-              <p className="text-sm font-semibold text-red-800 dark:text-red-300">
-                {metadata.opt_out_count} sender{metadata.opt_out_count !== 1 ? 's' : ''} asked to stop
-                {' — '}{metadata.still_sending_count} {metadata.still_sending_count === 1 ? 'is' : 'are'} still emailing you
-              </p>
-              <p className="text-xs text-red-700/80 dark:text-red-400 mt-0.5">
-                You replied asking {metadata.still_sending_count === 1 ? 'them' : 'these senders'} to stop, but they kept going.
-                Formally unsubscribing carries more legal weight and often works when a polite reply doesn&apos;t.
-              </p>
-            </div>
-          </div>
-          <Link
-            href="/sender-intelligence"
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-red-700 dark:text-red-300 hover:underline shrink-0 whitespace-nowrap"
-          >
-            View in Inbox Cleaner → Opt-outs
-            <ArrowRight className="w-3 h-3" />
-          </Link>
-        </div>
-      )}
-
       {/* ── Score hero ── */}
-      <div className="rounded-2xl border border-border bg-card px-6 py-4">
+      <div className="rounded-2xl border border-border bg-card px-6 py-4 space-y-4">
         <div className="flex items-center gap-5">
           <ScoreRingLarge score={score} />
 
@@ -1060,14 +861,8 @@ export function InboxHealthClient({
               </p>
             </div>
           </div>
-
         </div>
-      </div>
 
-
-      {/* ── Weekly noise briefing ── */}
-      <div className="mb-4">
-        <NoiseBriefingCard />
       </div>
 
       {/* ── Tab bar ── */}
@@ -1123,18 +918,6 @@ export function InboxHealthClient({
               </div>
             </div>
 
-            {/* Distribution + sparklines */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <div>
-                <DistributionDonut
-                  categoryCounts={metadata.category_counts}
-                  emailCountsByCategory={metadata.email_counts_by_category}
-                />
-              </div>
-              <div className="space-y-4">
-                <ComponentSparklines trend={trend} components={components} />
-              </div>
-            </div>
           </div>
         )}
 
@@ -1153,23 +936,6 @@ export function InboxHealthClient({
         )}
       </div>
 
-      {/* ── Bottom CTA ── */}
-      {activeTab !== 'recommendations' && activeTab !== 'alerts' && recommendations.length > 0 && (
-        <div className="rounded-xl border border-primary/20 bg-primary/5 px-5 py-4 flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-3">
-            <Zap className="w-4 h-4 text-primary shrink-0" />
-            <span className="text-sm">
-              <strong>{recommendations.length} action{recommendations.length > 1 ? 's' : ''}</strong> available
-              {' — '}complete them to gain up to{' '}
-              <strong className="text-primary">+{recommendations.reduce((s, r) => s + r.points_gained, 0)} pts</strong>
-            </span>
-          </div>
-          <Button size="sm" onClick={() => setActiveTab('recommendations')}>
-            View recommendations
-            <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
-          </Button>
-        </div>
-      )}
     </div>
     </>
   );

@@ -89,6 +89,7 @@ export function CreateCommitmentDialog({ open, onClose }: Props) {
   const [description,   setDescription]   = useState('');
   const [direction,     setDirection]     = useState<Direction>('outgoing');
   const [counterparty,  setCounterparty]  = useState('');
+  const [note,          setNote]          = useState('');
   const [dueDateInput,  setDueDateInput]  = useState('');
   const [parsedDate,    setParsedDate]    = useState<string | null>(null);
   const [priority,      setPriority]      = useState<Priority>(null);
@@ -107,6 +108,7 @@ export function CreateCommitmentDialog({ open, onClose }: Props) {
     setDescription('');
     setDirection('outgoing');
     setCounterparty('');
+    setNote('');
     setDueDateInput('');
     setParsedDate(null);
     setPriority(null);
@@ -127,6 +129,7 @@ export function CreateCommitmentDialog({ open, onClose }: Props) {
         counterparty: counterparty.trim() || null,
         due_date:     dueDate || null,
         priority,
+        note:         note.trim() || null,
       });
       if (result?.error) {
         toast.error(result.error);
@@ -205,6 +208,23 @@ export function CreateCommitmentDialog({ open, onClose }: Props) {
               placeholder="e.g. Alice Smith"
               className="h-8 text-sm"
               disabled={pending}
+            />
+          </div>
+
+          {/* Note */}
+          <div className="space-y-1.5">
+            <Label htmlFor="cc-note" className="text-xs">
+              Note
+              <span className="text-muted-foreground font-normal ml-1">(optional)</span>
+            </Label>
+            <Input
+              id="cc-note"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Any additional context…"
+              className="h-8 text-sm"
+              disabled={pending}
+              maxLength={500}
             />
           </div>
 

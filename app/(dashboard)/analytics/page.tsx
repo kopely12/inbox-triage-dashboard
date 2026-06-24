@@ -2,19 +2,15 @@ import { auth }         from '@/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 import { redirect }      from 'next/navigation';
 
-import { buildInsights }                                          from '@/components/analytics/insights-strip';
-import type { Range }                                             from '@/components/analytics/range-toggle';
-import type { ActivityPoint }                                     from '@/components/analytics/activity-chart';
-import type { ActionBreakdown }                                   from '@/components/analytics/action-rate-chart';
-import type { CommitmentDataset }                                 from '@/components/analytics/commitments-section';
-import type { HeatmapDay }                                        from '@/components/analytics/habit-heatmap';
-import type { SurfacingPoint }                                    from '@/components/analytics/surfacing-rate-chart';
-import type { RtBucket }                                          from '@/components/analytics/response-time-distribution';
-import type { CommitmentPoint }                                   from '@/components/analytics/commitment-chart';
-import type { AgeBucket }                                         from '@/components/analytics/commitment-age-chart';
-import type { SenderRow }                                         from '@/components/analytics/sender-table';
-import { Card, CardContent }                                      from '@/components/ui/card';
-import { AnalyticsClient }                                        from '@/components/analytics/analytics-client';
+import type { Range }            from '@/components/analytics/range-toggle';
+import type { CommitmentDataset } from '@/components/analytics/commitments-section';
+import type { CommitmentPoint }  from '@/components/analytics/commitment-chart';
+import type { AgeBucket }        from '@/components/analytics/commitment-age-chart';
+import type { SenderRow }        from '@/components/analytics/sender-table';
+import type { InboxHealthData }  from '@/components/analytics/inbox-health-tab';
+import { Card, CardContent }     from '@/components/ui/card';
+import { AnalyticsClient }       from '@/components/analytics/analytics-client';
+import { getInboxVolume }        from '@/app/actions/engagement';
 
 export const metadata = { title: 'Analytics — Inbox Triage' };
 
@@ -87,7 +83,7 @@ function computeCommitmentDataset(
 
   // Fulfillment
   const resolvedInRange = inRange.filter((c) => c.status === 'done').length;
-  const keptRate = inRange.length >= 5
+  const keptRate = inRange.length >= 3
     ? Math.round((resolvedInRange / inRange.length) * 100)
     : null;
 
@@ -221,11 +217,7 @@ export default async function AnalyticsPage({
 
   const todayISO = new Date().toISOString().slice(0, 10);
 
-  const fiftyTwoWeeksAgo = new Date();
-  fiftyTwoWeeksAgo.setUTCDate(fiftyTwoWeeksAgo.getUTCDate() - 52 * 7);
-  const fiftyTwoWeeksAgoISO = fiftyTwoWeeksAgo.toISOString();
-
-  const thisWeekStart = new Date(); thisWeekStart.setUTCDate(thisWeekStart.getUTCDate() - 6);  thisWeekStart.setUTCHours(0, 0, 0, 0);
+const thisWeekStart = new Date(); thisWeekStart.setUTCDate(thisWeekStart.getUTCDate() - 6);  thisWeekStart.setUTCHours(0, 0, 0, 0);
   const lastWeekStart = new Date(); lastWeekStart.setUTCDate(lastWeekStart.getUTCDate() - 13); lastWeekStart.setUTCHours(0, 0, 0, 0);
   const lastWeekEnd   = new Date(); lastWeekEnd.setUTCDate(lastWeekEnd.getUTCDate() - 7);      lastWeekEnd.setUTCHours(23, 59, 59, 999);
 
@@ -238,7 +230,6 @@ export default async function AnalyticsPage({
   const [
     { data: sessionsRaw },
     { count: allTimeTriagesCount },
-    { data: heatmapSessionsRaw },
     { data: outgoingInRangeRaw },
     { data: outgoingOpenAllRaw },
     { data: outgoingSenderRaw  },
@@ -246,6 +237,7 @@ export default async function AnalyticsPage({
     { data: assignedOpenAllRaw },
     { data: assignedSenderRaw  },
     { data: noiseSnapshotsRaw  },
+    { data: cleanupRaw        },
   ] = await Promise.all([
     safe(supabaseAdmin
       .from('triage_sessions')
@@ -257,12 +249,6 @@ export default async function AnalyticsPage({
       .from('triage_sessions')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', userId), null),
-
-    safe(supabaseAdmin
-      .from('triage_sessions')
-      .select('triggered_at')
-      .eq('user_id', userId)
-      .gte('triggered_at', fiftyTwoWeeksAgoISO), []),
 
     // Outgoing commitments in range
     safe(supabaseAdmin
@@ -320,6 +306,14 @@ export default async function AnalyticsPage({
       .gte('snapshot_date', weeksAgoISO.slice(0, 10))
       .order('snapshot_date', { ascending: true })
       .limit(52), []),
+
+    // Cleanup stats — senders unsubscribed or auto-archived
+    safe(supabaseAdmin
+      .from('sender_engagement')
+      .select('emails_received, period_days, unsubscribe_status, auto_archive_enabled')
+      .eq('user_id', userId)
+      .or('unsubscribe_status.eq.unsubscribed,auto_archive_enabled.eq.true'), []),
+
   ]);
 
   const sessions       = sessionsRaw ?? [];
@@ -349,91 +343,10 @@ export default async function AnalyticsPage({
     );
   }
 
-  // ── Secondary fetch: action results ───────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sessionIds = sessions.map((s: any) => s.id);
-  const { data: actionResultsRaw } = sessionIds.length > 0
-    ? await safe(supabaseAdmin
-        .from('triage_results')
-        .select('user_action, actioned_at, session_id')
-        .in('session_id', sessionIds), [])
-    : { data: [] };
-
-  // ── Session aggregates ────────────────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const triagesInRange  = sessions.length;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const scannedInRange  = sessions.reduce((a: number, s: any) => a + (s.emails_scanned  ?? 0), 0);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const surfacedInRange = sessions.reduce((a: number, s: any) => a + (s.emails_surfaced ?? 0), 0);
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const thisWeekSessions = sessions.filter((s: any) => s.triggered_at >= thisWeekStartISO);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const lastWeekSessions = sessions.filter((s: any) => s.triggered_at >= lastWeekStartISO && s.triggered_at <= lastWeekEndISO);
-
   const outgoingInRange = outgoingInRangeRaw ?? [];
 
-  const wow = {
-    thisTriages:  thisWeekSessions.length,
-    lastTriages:  lastWeekSessions.length,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    thisScanned:  thisWeekSessions.reduce((a: number, s: any) => a + (s.emails_scanned  ?? 0), 0),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    lastScanned:  lastWeekSessions.reduce((a: number, s: any) => a + (s.emails_scanned  ?? 0), 0),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    thisResolved: outgoingInRange.filter((c: any) => c.status === 'done' && c.resolved_at && c.resolved_at >= thisWeekStartISO).length,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    lastResolved: outgoingInRange.filter((c: any) => c.status === 'done' && c.resolved_at && c.resolved_at >= lastWeekStartISO && c.resolved_at <= lastWeekEndISO).length,
-  };
-
-  // ── Weekly buckets for activity chart ────────────────────────────────────
+  // ── Weekly buckets ────────────────────────────────────────────────────────
   const weeks = buildWeeks(effectiveWeeks);
-
-  const activityMap = new Map(weeks.map(({ key }) => [key, { sessions: 0, scanned: 0, surfaced: 0 }]));
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sessions.forEach((s: any) => {
-    const b = activityMap.get(toMondayKey(s.triggered_at));
-    if (b) { b.sessions += 1; b.scanned += s.emails_scanned ?? 0; b.surfaced += s.emails_surfaced ?? 0; }
-  });
-  const activityData: ActivityPoint[] = weeks.map(({ key, label }) => ({ label, ...activityMap.get(key)! }));
-
-  // ── Action breakdown ──────────────────────────────────────────────────────
-  const actionResults = actionResultsRaw ?? [];
-  const actionBreakdown: ActionBreakdown = { replied: 0, snoozed: 0, dismissed: 0, pending: 0 };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  actionResults.forEach((r: any) => {
-    const a = r.user_action as string | null;
-    if (a === 'replied')        actionBreakdown.replied   += 1;
-    else if (a === 'snoozed')   actionBreakdown.snoozed   += 1;
-    else if (a === 'dismissed') actionBreakdown.dismissed += 1;
-    else                        actionBreakdown.pending   += 1;
-  });
-  const totalActioned = actionBreakdown.replied + actionBreakdown.snoozed + actionBreakdown.dismissed + actionBreakdown.pending;
-
-  // ── Weekly signal quality trend ───────────────────────────────────────────
-  // Bucket triage_results by the week of their session to show reply/dismiss trends.
-  const sessionTriagedAt = new Map((sessionsRaw ?? []).map((s: any) => [s.id, s.triggered_at])); // eslint-disable-line @typescript-eslint/no-explicit-any
-  const signalMap = new Map(weeks.map(({ key }) => [key, { replied: 0, dismissed: 0, total: 0 }]));
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  actionResults.forEach((r: any) => {
-    const sessionTs = sessionTriagedAt.get(r.session_id);
-    if (!sessionTs) return;
-    const bucket = signalMap.get(toMondayKey(sessionTs));
-    if (!bucket) return;
-    bucket.total += 1;
-    if (r.user_action === 'replied')        bucket.replied   += 1;
-    else if (r.user_action === 'dismissed') bucket.dismissed += 1;
-  });
-  const signalQualityData: import('@/components/analytics/signal-quality-trend-chart').SignalQualityPoint[] =
-    weeks.map(({ key, label }) => {
-      const b = signalMap.get(key)!;
-      return {
-        label,
-        replyRate:   b.total >= 3 ? Math.round((b.replied   / b.total) * 100) : null,
-        dismissRate: b.total >= 3 ? Math.round((b.dismissed / b.total) * 100) : null,
-      };
-    });
 
   // ── Noise trend ───────────────────────────────────────────────────────────
   const noiseTrendData: import('@/components/analytics/noise-trend-chart').NoiseTrendPoint[] =
@@ -441,57 +354,6 @@ export default async function AnalyticsPage({
       date:       s.snapshot_date as string,
       noiseScore: s.noise_score   as number,
     }));
-
-  // ── Response time ─────────────────────────────────────────────────────────
-  const allResponseHours: number[] = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  actionResults
-    .filter((r: any) => r.user_action === 'replied' && r.actioned_at)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .forEach((r: any) => {
-      const sessionTs = sessionTriagedAt.get(r.session_id);
-      if (!sessionTs) return;
-      const diffHours = (new Date(r.actioned_at).getTime() - new Date(sessionTs).getTime()) / 3600000;
-      if (diffHours < 0 || diffHours > 168) return;
-      allResponseHours.push(diffHours);
-    });
-  allResponseHours.sort((a, b) => a - b);
-  const p50 = percentile(allResponseHours, 0.5);
-  const p90 = allResponseHours.length >= 5 ? percentile(allResponseHours, 0.9) : null;
-
-  const RT_BUCKETS: { label: string; min: number; max: number; count: number }[] = [
-    { label: '<1h',    min: 0,  max: 1,        count: 0 },
-    { label: '1–4h',  min: 1,  max: 4,        count: 0 },
-    { label: '4–12h', min: 4,  max: 12,       count: 0 },
-    { label: '12–24h', min: 12, max: 24,      count: 0 },
-    { label: '1–2d',  min: 24, max: 48,       count: 0 },
-    { label: '>2d',   min: 48, max: Infinity,  count: 0 },
-  ];
-  allResponseHours.forEach((h) => {
-    const bucket = RT_BUCKETS.find(({ min, max }) => h >= min && h < max);
-    if (bucket) bucket.count += 1;
-  });
-  const rtBuckets: RtBucket[] = RT_BUCKETS.map(({ label, count }) => ({ label, count }));
-
-  // ── Surfacing rate ────────────────────────────────────────────────────────
-  const surfacingRateData: SurfacingPoint[] = weeks.map(({ key, label }) => {
-    const b = activityMap.get(key)!;
-    return { label, rate: b.scanned > 0 ? Math.round((b.surfaced / b.scanned) * 100) : null };
-  });
-  const ratePoints     = surfacingRateData.filter((d) => d.rate !== null);
-  const overallAvgRate = ratePoints.length > 0
-    ? Math.round(ratePoints.reduce((a, d) => a + d.rate!, 0) / ratePoints.length)
-    : null;
-
-  // ── Heatmap ───────────────────────────────────────────────────────────────
-  const heatmapByDay = new Map<string, number>();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (heatmapSessionsRaw ?? []).forEach((s: any) => {
-    const day = s.triggered_at.slice(0, 10);
-    heatmapByDay.set(day, (heatmapByDay.get(day) ?? 0) + 1);
-  });
-  const heatmapDays: HeatmapDay[]  = [...heatmapByDay.entries()].map(([date, count]) => ({ date, count }));
-  const heatmapTotal                = (heatmapSessionsRaw ?? []).length;
 
   // ── Commitment datasets ───────────────────────────────────────────────────
   const outgoingDataset = computeCommitmentDataset(
@@ -503,56 +365,49 @@ export default async function AnalyticsPage({
     weeks, thisWeekStartISO, lastWeekStartISO, lastWeekEndISO, midPointISO, todayISO, rangeLabel,
   );
 
-  // ── Overview tiles ────────────────────────────────────────────────────────
+  // ── Inbox Health data ─────────────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const outgoingResolved = outgoingInRange.filter((c: any) => c.status === 'done').length;
-  const outgoingTotal    = outgoingInRange.length;
-  const fulfillmentPct   = outgoingTotal >= 5
-    ? Math.round((outgoingResolved / outgoingTotal) * 100)
-    : null;
-  const outgoingOpenCount = (outgoingOpenAllRaw ?? []).length;
+  const cleanupSenders = (cleanupRaw ?? []) as any[];
+  const unsubscribedCount = cleanupSenders.filter((s) => s.unsubscribe_status === 'unsubscribed').length;
+  const autoArchivedOnlyCount = cleanupSenders.filter(
+    (s) => s.auto_archive_enabled && s.unsubscribe_status !== 'unsubscribed',
+  ).length;
+  const cleanedCount             = unsubscribedCount + autoArchivedOnlyCount;
+  const emailsPerMonthEliminated = Math.round(
+    cleanupSenders.reduce((n, s) => n + (s.emails_received / (s.period_days || 90)) * 30, 0),
+  );
 
-  // ── Insights ──────────────────────────────────────────────────────────────
-  const insights = buildInsights({
-    triageCount:   triagesInRange,
+  const latestSnapshot   = (noiseSnapshotsRaw ?? []).at(-1) as { noise_score: number } | undefined;
+  const earliestSnapshot = (noiseSnapshotsRaw ?? [])[0]     as { noise_score: number } | undefined;
+  const toNoisePct       = (score: number) => Math.round(((25 - score) / 25) * 100);
+  const currentNoisePct  = latestSnapshot   ? toNoisePct(latestSnapshot.noise_score)   : null;
+  const earliestNoisePct = earliestSnapshot ? toNoisePct(earliestSnapshot.noise_score) : null;
+  const noisePctChange   = currentNoisePct !== null && earliestNoisePct !== null
+    ? currentNoisePct - earliestNoisePct : null;
+
+  const volumeGranularity = validRange === '4w' ? 'weekly' : 'monthly';
+  const volumeMonths =
+    validRange === '4w'  ? 1  :
+    validRange === '12w' ? 3  :
+    validRange === '6m'  ? 6  : undefined;
+  const volumeData = await getInboxVolume(volumeGranularity, volumeMonths);
+
+  const inboxHealthData: InboxHealthData = {
+    cleanedCount,
+    unsubscribedCount,
+    emailsPerMonthEliminated,
+    currentNoisePct,
+    noisePctChange,
+    noiseTrendData,
+    volumeData,
     rangeLabel,
-    surfacingRate: overallAvgRate,
-    replyCount:    actionBreakdown.replied,
-    dismissCount:  actionBreakdown.dismissed,
-    snoozedCount:  actionBreakdown.snoozed,
-    totalActioned,
-    p50Hours:      p50,
-    openCount:     outgoingOpenCount,
-    overdueCount:  outgoingDataset.overdueCount,
-    avgAgeDays:    outgoingDataset.avgAgeDays,
-    keptRate:      fulfillmentPct,
-  });
+  };
 
   return (
     <AnalyticsClient
       validRange={validRange}
       rangeLabel={rangeLabel}
-      summary={{
-        triagesInRange,
-        allTimeTriages,
-        scannedInRange,
-        surfacedInRange,
-        outgoingResolved,
-        outgoingTotal,
-        outgoingOpenCount,
-        fulfillmentPct,
-        wow,
-      }}
-      insights={insights}
-      heatmapDays={heatmapDays}
-      heatmapTotal={heatmapTotal}
-      activityData={activityData}
-      signalQualityData={signalQualityData}
-      noiseTrendData={noiseTrendData}
-      rtBuckets={rtBuckets}
-      totalReplies={allResponseHours.length}
-      p50={p50}
-      p90={p90}
+      inboxHealthData={inboxHealthData}
       outgoingDataset={outgoingDataset}
       assignedDataset={assignedDataset}
     />

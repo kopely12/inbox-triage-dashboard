@@ -16,12 +16,15 @@ async function requireUser() {
 // ── Refresh ───────────────────────────────────────────────────────────────────
 // Calls Express backend (background job — returns immediately).
 
-export async function triggerRefresh(): Promise<{ status: string; error?: string }> {
+export async function triggerRefresh(force = false): Promise<{ status: string; error?: string }> {
   const { error, userId } = await requireUser();
   if (error) return { status: 'error', error };
 
   try {
-    const res = await fetch(`${API_URL}/api/engagement/refresh`, {
+    const url = force
+      ? `${API_URL}/api/engagement/refresh?force=true`
+      : `${API_URL}/api/engagement/refresh`;
+    const res = await fetch(url, {
       method:  'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -227,6 +230,7 @@ export type StorageSender = {
 
 export type LargeEmail = {
   id:           string;
+  thread_id:    string | null;
   size_bytes:   number;
   size_mb:      string;
   subject:      string;
@@ -1057,10 +1061,11 @@ export async function addDomainToWhitelist(domain: string): Promise<{ error?: st
   if (error) return { error };
 
   const { data } = await supabaseAdmin.from('users').select('preferences').eq('id', userId!).single();
-  const prefs     = data?.preferences ?? {};
-  const existing  = (prefs.screener_whitelist as string[]) ?? [];
+  const prefs    = data?.preferences ?? {};
+  const eng      = (prefs.engagement as Record<string, unknown>) ?? {};
+  const existing = (eng.screener_whitelist as string[]) ?? [];
   if (existing.includes(domain)) return {};
-  const updated = { ...prefs, screener_whitelist: [...existing, domain] };
+  const updated = { ...prefs, engagement: { ...eng, screener_whitelist: [...existing, domain] } };
   const { error: dbErr } = await supabaseAdmin.from('users').update({ preferences: updated }).eq('id', userId!);
   if (dbErr) return { error: dbErr.message };
   revalidatePath('/sender-intelligence');
@@ -1073,8 +1078,9 @@ export async function removeDomainFromWhitelist(domain: string): Promise<{ error
 
   const { data } = await supabaseAdmin.from('users').select('preferences').eq('id', userId!).single();
   const prefs    = data?.preferences ?? {};
-  const existing = (prefs.screener_whitelist as string[]) ?? [];
-  const updated  = { ...prefs, screener_whitelist: existing.filter((d) => d !== domain) };
+  const eng      = (prefs.engagement as Record<string, unknown>) ?? {};
+  const existing = (eng.screener_whitelist as string[]) ?? [];
+  const updated  = { ...prefs, engagement: { ...eng, screener_whitelist: existing.filter((d) => d !== domain) } };
   const { error: dbErr } = await supabaseAdmin.from('users').update({ preferences: updated }).eq('id', userId!);
   if (dbErr) return { error: dbErr.message };
   revalidatePath('/sender-intelligence');
@@ -1289,87 +1295,6 @@ export async function getFilterSuggestions(): Promise<{
   return { suggestions };
 }
 
-// ── Filter audit ──────────────────────────────────────────────────────────────
-
-export type FilterIssueType = 'orphaned' | 'dead' | 'duplicate' | 'untracked' | 'stale_reference';
-
-export type FilterIssue = {
-  type:          FilterIssueType;
-  filter_id:     string;
-  from_value:    string;
-  sender_email?: string;
-  is_tracked:    boolean;
-  // orphaned
-  reason?:       string;
-  category?:     string;
-  // dead
-  days_silent?:  number | null;
-  // duplicate
-  action?:       string;
-  original_id?:  string;
-};
-
-export type FilterAuditSummary = {
-  total_gmail_filters: number;
-  archive_filters:     number;
-  orphaned:            number;
-  dead:                number;
-  duplicate:           number;
-  untracked:           number;
-  stale_reference:     number;
-  total_issues:        number;
-};
-
-export type FilterAuditResult = {
-  issues:  FilterIssue[];
-  summary: FilterAuditSummary;
-  error?:  string;
-};
-
-export async function getFilterAudit(): Promise<FilterAuditResult> {
-  const { error, userId } = await requireUser();
-  const empty: FilterAuditResult = {
-    issues:  [],
-    summary: { total_gmail_filters: 0, archive_filters: 0, orphaned: 0, dead: 0, duplicate: 0, untracked: 0, stale_reference: 0, total_issues: 0 },
-  };
-  if (error) return { ...empty, error };
-
-  try {
-    const res = await fetch(`${API_URL}/api/engagement/filter-audit`, {
-      headers: { 'x-service-key': SERVICE_KEY, 'x-user-id': userId! },
-      cache: 'no-store',
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      return { ...empty, error: data.error || `HTTP ${res.status}` };
-    }
-    const data = await res.json();
-    return { issues: data.issues || [], summary: data.summary || empty.summary };
-  } catch (err: unknown) {
-    return { ...empty, error: err instanceof Error ? err.message : 'Request failed' };
-  }
-}
-
-export async function deleteFilterAuditItem(filterId: string): Promise<{ success: boolean; error?: string }> {
-  const { error, userId: _userId } = await requireUser();
-  if (error) return { success: false, error };
-
-  try {
-    const res = await fetch(`${API_URL}/api/engagement/filter-audit/${encodeURIComponent(filterId)}`, {
-      method:  'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      // Uses session cookie auth (authenticateSession) — no service key needed
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      return { success: false, error: data.error || `HTTP ${res.status}` };
-    }
-    revalidatePath('/sender-intelligence');
-    return { success: true };
-  } catch (err: unknown) {
-    return { success: false, error: err instanceof Error ? err.message : 'Request failed' };
-  }
-}
 
 // ── Auto-clean: manual one-time run ──────────────────────────────────────────
 
@@ -1475,4 +1400,115 @@ export async function getHomepageSummary(): Promise<HomepageSummary | null> {
     hasAnyRules:       (autopilotRules?.length ?? 0) > 0,
     autopilotEnabled:  (autopilotRules ?? []).some((r) => r.enabled),
   };
+}
+
+// ── Inbox volume ───────────────────────────────────────────────────────────────
+
+export type VolumeMonth = {
+  month:      string;   // "Mar 2026" or "Jun 3" (weekly)
+  total:      number;
+  primary:    number;   // personal / work (total minus categorised)
+  social:     number;
+  promotions: number;
+  updates:    number;
+  forums:     number;
+  sent:       number;
+  partial:    boolean;  // true for the current in-progress month
+};
+
+export async function getInboxVolume(granularity: 'monthly' | 'weekly' = 'monthly', months?: number): Promise<VolumeMonth[]> {
+  const { error, userId } = await requireUser();
+  if (error) return [];
+
+  try {
+    const params = new URLSearchParams({ user_id: userId!, granularity });
+    if (months) params.set('months', String(months));
+    const res = await fetch(
+      `${API_URL}/api/engagement/inbox-volume?${params}`,
+      { headers: { 'x-service-key': SERVICE_KEY }, cache: 'no-store' },
+    );
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data ?? [];
+  } catch {
+    return [];
+  }
+}
+
+// ── Filter audit ──────────────────────────────────────────────────────────────
+
+export type FilterIssueType = 'orphaned' | 'dead' | 'duplicate' | 'untracked' | 'stale_reference';
+
+export type FilterIssue = {
+  type:          FilterIssueType;
+  filter_id:     string;
+  from_value:    string;
+  sender_email?: string;
+  is_tracked:    boolean;
+  reason?:       string;
+  category?:     string;
+  days_silent?:  number | null;
+  action?:       string;
+  original_id?:  string;
+};
+
+export type FilterAuditSummary = {
+  total_gmail_filters: number;
+  archive_filters:     number;
+  orphaned:            number;
+  dead:                number;
+  duplicate:           number;
+  untracked:           number;
+  stale_reference:     number;
+  total_issues:        number;
+};
+
+export type FilterAuditResult = {
+  issues:  FilterIssue[];
+  summary: FilterAuditSummary;
+  error?:  string;
+};
+
+export async function getFilterAudit(): Promise<FilterAuditResult> {
+  const { error, userId } = await requireUser();
+  const empty: FilterAuditResult = {
+    issues:  [],
+    summary: { total_gmail_filters: 0, archive_filters: 0, orphaned: 0, dead: 0, duplicate: 0, untracked: 0, stale_reference: 0, total_issues: 0 },
+  };
+  if (error) return { ...empty, error };
+
+  try {
+    const res = await fetch(`${API_URL}/api/engagement/filter-audit`, {
+      headers: { 'x-service-key': SERVICE_KEY, 'x-user-id': userId! },
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return { ...empty, error: data.error || `HTTP ${res.status}` };
+    }
+    const data = await res.json();
+    return { issues: data.issues || [], summary: data.summary || empty.summary };
+  } catch (err: unknown) {
+    return { ...empty, error: err instanceof Error ? err.message : 'Request failed' };
+  }
+}
+
+export async function deleteFilterAuditItem(filterId: string): Promise<{ success: boolean; error?: string }> {
+  const { error } = await requireUser();
+  if (error) return { success: false, error };
+
+  try {
+    const res = await fetch(`${API_URL}/api/engagement/filter-audit/${encodeURIComponent(filterId)}`, {
+      method:  'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return { success: false, error: data.error || `HTTP ${res.status}` };
+    }
+    revalidatePath('/sender-intelligence');
+    return { success: true };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : 'Request failed' };
+  }
 }

@@ -6,8 +6,12 @@ import {
   updateCommitmentPriority, updateCommitmentNote, dismissCommitment,
 } from '@/app/actions/commitments';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn }     from '@/lib/utils';
-import { Loader2, CheckCircle2, RotateCcw, Calendar, X, StickyNote } from 'lucide-react';
+import { Loader2, CheckCircle2, RotateCcw, Calendar, X, StickyNote, ChevronDown } from 'lucide-react';
 
 // ── Mark done / reopen ────────────────────────────────────────────────────────
 
@@ -90,50 +94,87 @@ export function DueDateCell({ id, dueDate }: { id: string; dueDate: string | nul
   );
 }
 
-// ── Priority button (cycles high → medium → low → none) ──────────────────────
+// ── Priority dropdown ─────────────────────────────────────────────────────────
 
 type Priority = 'high' | 'medium' | 'low' | null;
 
-const PRIORITY_CYCLE: Priority[] = ['high', 'medium', 'low', null];
-const PRIORITY_LABEL: Record<NonNullable<Priority>, string> = {
-  high: 'High', medium: 'Med', low: 'Low',
-};
-const PRIORITY_CLS: Record<NonNullable<Priority>, string> = {
+const PRIORITY_OPTIONS: { value: Priority; label: string; cls: string }[] = [
+  {
+    value: 'high',
+    label: 'High',
+    cls: 'text-red-600 dark:text-red-400',
+  },
+  {
+    value: 'medium',
+    label: 'Medium',
+    cls: 'text-amber-600 dark:text-amber-400',
+  },
+  {
+    value: 'low',
+    label: 'Low',
+    cls: 'text-blue-600 dark:text-blue-400',
+  },
+  {
+    value: null,
+    label: 'No priority',
+    cls: 'text-muted-foreground',
+  },
+];
+
+const PRIORITY_BADGE_CLS: Record<NonNullable<Priority>, string> = {
   high:   'text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40',
   medium: 'text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40',
   low:    'text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40',
+};
+
+const PRIORITY_LABEL: Record<NonNullable<Priority>, string> = {
+  high: 'High', medium: 'Med', low: 'Low',
 };
 
 export function PriorityButton({ id, priority }: { id: string; priority: Priority }) {
   const [pending, startTransition] = useTransition();
   const [optimistic, setOptimistic] = useState<Priority>(priority);
 
-  function cycle() {
-    const idx  = PRIORITY_CYCLE.indexOf(optimistic);
-    const next = PRIORITY_CYCLE[(idx + 1) % PRIORITY_CYCLE.length];
+  function set(next: Priority) {
     setOptimistic(next);
     startTransition(() => { updateCommitmentPriority(id, next); });
   }
 
-  if (!optimistic) {
-    return (
-      <button onClick={cycle} disabled={pending}
-        title="Set priority"
-        className="text-xs text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-accent transition-colors">
-        {pending ? <Loader2 className="w-3 h-3 animate-spin inline" /> : '— priority'}
-      </button>
-    );
-  }
-
   return (
-    <button onClick={cycle} disabled={pending}
-      title={`Priority: ${PRIORITY_LABEL[optimistic]} — click to change`}
-      className={cn(
-        'text-xs px-1.5 py-0.5 rounded border font-medium transition-colors',
-        PRIORITY_CLS[optimistic],
-      )}>
-      {pending ? <Loader2 className="w-3 h-3 animate-spin inline" /> : PRIORITY_LABEL[optimistic]}
-    </button>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          disabled={pending}
+          title="Set priority"
+          className={cn(
+            'flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded transition-colors',
+            optimistic
+              ? cn('border font-medium', PRIORITY_BADGE_CLS[optimistic])
+              : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+          )}
+        >
+          {pending
+            ? <Loader2 className="w-3 h-3 animate-spin" />
+            : optimistic
+            ? <>{PRIORITY_LABEL[optimistic]} <ChevronDown className="w-2.5 h-2.5 opacity-60" /></>
+            : '— priority'}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-36">
+        {PRIORITY_OPTIONS.map(({ value, label, cls }) => (
+          <DropdownMenuItem
+            key={label}
+            onClick={() => set(value)}
+            className={cn('gap-2', cls)}
+          >
+            <span className="w-3 shrink-0 text-center">
+              {optimistic === value ? '✓' : ''}
+            </span>
+            {label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -164,7 +205,7 @@ export function NoteEditor({ id, note }: { id: string; note: string | null }) {
         <StickyNote className="w-3 h-3 opacity-50 group-hover:opacity-100 shrink-0" />
         {note
           ? <span className="italic truncate max-w-[240px]">{note}</span>
-          : <span className="opacity-0 group-hover:opacity-60">Add note…</span>
+          : <span className="opacity-40 group-hover:opacity-70">Add note…</span>
         }
       </button>
     );

@@ -17,21 +17,16 @@ const VALID_TIMEZONES = new Set([
   'Pacific/Auckland', 'Pacific/Honolulu',
 ]);
 
-const VALID_SNOOZE_HOURS = new Set([1, 4, 24, 48, 72, 168]);
-
 export async function updatePreferences(formData: FormData) {
   const session = await auth();
   if (!session?.user?.id) return { error: 'Unauthenticated' };
 
-  const timezone            = formData.get('timezone') as string;
-  const defaultSnoozeHours  = Number(formData.get('default_snooze_hours'));
-
-  if (!VALID_TIMEZONES.has(timezone))       return { error: 'Invalid timezone.' };
-  if (!VALID_SNOOZE_HOURS.has(defaultSnoozeHours)) return { error: 'Invalid snooze duration.' };
+  const timezone = formData.get('timezone') as string;
+  if (!VALID_TIMEZONES.has(timezone)) return { error: 'Invalid timezone.' };
 
   const { error } = await supabaseAdmin
     .from('users')
-    .update({ timezone, default_snooze_hours: defaultSnoozeHours, updated_at: new Date().toISOString() })
+    .update({ timezone, updated_at: new Date().toISOString() })
     .eq('id', session.user.id);
 
   if (error) return { error: 'Failed to save preferences.' };

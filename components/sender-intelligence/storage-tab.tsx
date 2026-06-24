@@ -1,33 +1,22 @@
 'use client';
 
-// StorageTab — shows which senders are consuming the most Gmail storage.
+// StorageTab — shows large emails consuming Gmail storage.
 // Data is fetched on-demand (may take 5-20s for large inboxes) and cached for 1 hour.
 
 import { useState, useEffect, useCallback } from 'react';
+import { useSession } from 'next-auth/react';
 import { toast } from 'sonner';
 import { HardDrive, RefreshCw, Loader2, Trash2, AlertTriangle, ExternalLink, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn }     from '@/lib/utils';
-import { getStorageAnalysis, trashEmail, untrashEmail, executeBulkAction, type StorageResult, type StorageSender, type LargeEmail } from '@/app/actions/engagement';
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function mbBar(mb: string, maxMb: number) {
-  const pct = Math.min(100, (parseFloat(mb) / maxMb) * 100);
-  return (
-    <div className="h-1.5 bg-muted rounded-full overflow-hidden flex-1 max-w-[120px]">
-      <div className="h-full bg-amber-400 rounded-full" style={{ width: `${pct}%` }} />
-    </div>
-  );
-}
+import { getStorageAnalysis, trashEmail, untrashEmail, type StorageResult, type LargeEmail } from '@/app/actions/engagement';
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function StorageTab() {
-  const [result,   setResult]   = useState<StorageResult | null>(null);
-  const [loading,  setLoading]  = useState(false);
-  const [error,    setError]    = useState<string | null>(null);
-  const [tab,      setTab]      = useState<'senders' | 'emails'>('senders');
+  const [result,  setResult]  = useState<StorageResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState<string | null>(null);
 
   const load = useCallback(async (force = false) => {
     setLoading(true);
@@ -38,12 +27,7 @@ export function StorageTab() {
     if (data) setResult(data);
   }, []);
 
-  // Load on first render
   useEffect(() => { load(); }, [load]);
-
-  const maxMb = result
-    ? Math.max(...result.senders_by_storage.map((s) => parseFloat(s.total_mb)), 1)
-    : 1;
 
   return (
     <div className="flex flex-col h-full">
@@ -86,10 +70,10 @@ export function StorageTab() {
       )}
 
       {result && (() => {
-        const scannedMb  = parseFloat(result.total_scanned_mb) || 0;
-        const quotaMb    = 15 * 1024; // 15 GB in MB
-        const quotaPct   = Math.min(100, (scannedMb / quotaMb) * 100);
-        const scannedGb  = (scannedMb / 1024).toFixed(2);
+        const scannedMb = parseFloat(result.total_scanned_mb) || 0;
+        const quotaMb   = 15 * 1024;
+        const quotaPct  = Math.min(100, (scannedMb / quotaMb) * 100);
+        const scannedGb = (scannedMb / 1024).toFixed(2);
         return (
           <div className="flex items-center gap-3 px-6 py-2.5 border-b border-border shrink-0 bg-muted/30">
             <div className="flex-1 min-w-0">
@@ -119,165 +103,17 @@ export function StorageTab() {
       })()}
 
       {result && (
-        <>
-          {/* Tabs */}
-          <div className="flex gap-1 px-6 pt-4 pb-2 shrink-0">
-            {(['senders', 'emails'] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={cn(
-                  'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-                  tab === t ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent',
-                )}
-              >
-                {t === 'senders' ? `Top Senders (${result.senders_by_storage.length})` : `Largest Emails (${result.largest_emails.length})`}
-              </button>
-            ))}
-          </div>
-
-          {/* Table */}
-          <div className="flex-1 overflow-auto">
-            {tab === 'senders' ? (
-              <SenderStorageTable senders={result.senders_by_storage} maxMb={maxMb} />
-            ) : (
-              <LargeEmailTable emails={result.largest_emails} />
-            )}
-          </div>
-        </>
+        <div className="flex-1 overflow-auto">
+          <LargeEmailTable emails={result.largest_emails} />
+        </div>
       )}
     </div>
   );
 }
 
-type SenderRowState = 'idle' | 'confirming' | 'deleting' | 'deleted';
-
-function SenderStorageTable({
-  senders: initialSenders, maxMb,
-}: {
-  senders: StorageSender[];
-  maxMb:   number;
-}) {
-  const [rows,     setRows]     = useState<StorageSender[]>(initialSenders);
-  const [rowState, setRowState] = useState<Map<string, SenderRowState>>(new Map());
-
-  function getState(email: string): SenderRowState {
-    return rowState.get(email) ?? 'idle';
-  }
-
-  function setState(email: string, state: SenderRowState) {
-    setRowState((prev) => new Map([...prev, [email, state]]));
-  }
-
-  async function handleDelete(s: StorageSender, andUnsubscribe = false) {
-    setState(s.sender_email, 'deleting');
-    const actions = [executeBulkAction('bulk_delete', [s.sender_email])];
-    if (andUnsubscribe) actions.push(executeBulkAction('unsubscribe', [s.sender_email]));
-    const results = await Promise.all(actions);
-    if (results[0].error || results[0].succeeded === 0) {
-      toast.error(`Could not delete emails from ${s.sender_name || s.sender_email}`);
-      setState(s.sender_email, 'idle');
-      return;
-    }
-    setState(s.sender_email, 'deleted');
-    setTimeout(() => {
-      setRows((prev) => prev.filter((r) => r.sender_email !== s.sender_email));
-    }, 1400);
-    if (andUnsubscribe) toast.success(`Emails deleted and unsubscribed from ${s.sender_name || s.sender_email}`);
-  }
-
-  if (!rows.length) {
-    return (
-      <div className="text-center py-12 text-muted-foreground text-sm">
-        No emails over 1 MB found. Your inbox is storage-efficient!
-      </div>
-    );
-  }
-
-  return (
-    <table className="w-full text-sm">
-      <thead className="sticky top-0 bg-card border-b border-border z-10">
-        <tr>
-          <th className="px-6 py-3 text-left font-medium text-muted-foreground">Sender</th>
-          <th className="px-6 py-3 text-right font-medium text-muted-foreground">Emails</th>
-          <th className="px-6 py-3 text-right font-medium text-muted-foreground">Total size</th>
-          <th className="px-6 py-3 text-left font-medium text-muted-foreground hidden md:table-cell w-40">Usage</th>
-          <th className="px-6 py-3 w-24" />
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-border">
-        {rows.map((s) => {
-          const state = getState(s.sender_email);
-          return (
-            <tr
-              key={s.sender_email}
-              className={cn(
-                'transition-all duration-500',
-                state === 'deleted'
-                  ? 'opacity-0 bg-green-50'
-                  : state === 'confirming'
-                    ? 'bg-red-50/50'
-                    : 'hover:bg-muted/30',
-              )}
-            >
-              <td className="px-6 py-3 max-w-xs">
-                <div className="font-medium truncate">{s.sender_name || s.sender_email}</div>
-                {s.sender_name && <div className="text-xs text-muted-foreground truncate">{s.sender_email}</div>}
-              </td>
-              <td className="px-6 py-3 text-right tabular-nums text-muted-foreground">
-                {s.message_count.toLocaleString()}
-              </td>
-              <td className="px-6 py-3 text-right tabular-nums font-medium">
-                {parseFloat(s.total_mb) >= 1000
-                  ? `${(parseFloat(s.total_mb) / 1024).toFixed(1)} GB`
-                  : `${s.total_mb} MB`}
-              </td>
-              <td className="px-6 py-3 hidden md:table-cell">
-                {mbBar(s.total_mb, maxMb)}
-              </td>
-              <td className="px-6 py-3">
-                {state === 'confirming' ? (
-                  <div className="flex flex-col gap-1 items-end">
-                    <div className="flex items-center gap-1">
-                      <Button size="sm" variant="destructive" className="h-6 px-2 text-xs whitespace-nowrap"
-                        onClick={() => handleDelete(s)}>Delete emails</Button>
-                      <Button size="sm" variant="outline" className="h-6 px-2 text-xs whitespace-nowrap text-red-700 border-red-200 hover:bg-red-50"
-                        onClick={() => handleDelete(s, true)}>+ Unsubscribe</Button>
-                      <Button size="sm" variant="ghost" className="h-6 px-2 text-xs"
-                        onClick={() => setState(s.sender_email, 'idle')}>Cancel</Button>
-                    </div>
-                  </div>
-                ) : state === 'deleting' ? (
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span className="text-xs">Deleting…</span>
-                  </div>
-                ) : state === 'deleted' ? (
-                  <div className="flex items-center gap-1.5 text-green-600">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span className="text-xs font-medium">Deleted</span>
-                  </div>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                    onClick={() => setState(s.sender_email, 'confirming')}
-                    title="Delete all emails from this sender"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
-                )}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
-}
-
 function LargeEmailTable({ emails: initialEmails }: { emails: LargeEmail[] }) {
+  const { data: session } = useSession();
+  const gmailAcct = session?.user?.email ? encodeURIComponent(session.user.email) : '0';
   const [emails,   setEmails]   = useState<LargeEmail[]>(initialEmails);
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -353,7 +189,7 @@ function LargeEmailTable({ emails: initialEmails }: { emails: LargeEmail[] }) {
             <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">From</th>
             <th className="px-4 py-3 text-right font-medium text-muted-foreground">Size</th>
             <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Date</th>
-            <th className="px-4 py-3 w-10" />
+            <th className="px-4 py-3 w-20" />
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -379,10 +215,23 @@ function LargeEmailTable({ emails: initialEmails }: { emails: LargeEmail[] }) {
                 {e.date_ts ? new Date(e.date_ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
               </td>
               <td className="px-4 py-3">
-                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                  onClick={() => handleTrash(e)} disabled={deleting.has(e.id)} title="Move to trash">
-                  {deleting.has(e.id) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                </Button>
+                <div className="flex items-center gap-1">
+                  {e.thread_id && (
+                    <a
+                      href={`https://mail.google.com/mail/u/${gmailAcct}/#all/${e.thread_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Open in Gmail"
+                      className="inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  )}
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                    onClick={() => handleTrash(e)} disabled={deleting.has(e.id)} title="Move to trash">
+                    {deleting.has(e.id) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  </Button>
+                </div>
               </td>
             </tr>
           ))}

@@ -5,8 +5,8 @@ import { supabaseAdmin }  from '@/lib/supabase';
 import { revalidatePath } from 'next/cache';
 
 function bust() {
-  revalidatePath('/commitments');
-  revalidatePath('/'); // overview My Week card
+  revalidatePath('/track');
+  revalidatePath('/'); // overview
 }
 
 async function requireUser() {
@@ -156,6 +156,7 @@ export async function createCommitment(data: {
   counterparty?: string | null;
   due_date?:    string | null;
   priority?:    'high' | 'medium' | 'low' | null;
+  note?:        string | null;
 }) {
   const { error, userId } = await requireUser();
   if (error) return { error };
@@ -166,8 +167,10 @@ export async function createCommitment(data: {
   if (!VALID_DIRECTIONS.has(data.direction)) return { error: 'Invalid direction.' };
   if (data.priority && !VALID_PRIORITIES.has(data.priority)) return { error: 'Invalid priority.' };
 
-  const dueDate     = data.due_date && /^\d{4}-\d{2}-\d{2}$/.test(data.due_date) ? data.due_date : null;
+  const dueDate      = data.due_date && /^\d{4}-\d{2}-\d{2}$/.test(data.due_date) ? data.due_date : null;
   const counterparty = data.counterparty?.trim() || null;
+  const note         = data.note?.trim() || null;
+  if (note && note.length > 500) return { error: 'Note too long (max 500 characters).' };
 
   const { error: dbError } = await supabaseAdmin
     .from('commitments')
@@ -178,6 +181,7 @@ export async function createCommitment(data: {
       counterparty,
       due_date:    dueDate,
       priority:    data.priority ?? null,
+      note,
       status:      'open',
       scanned_at:  new Date().toISOString(),
       thread_id:   `manual_${Date.now()}`,
@@ -244,6 +248,124 @@ export async function bulkSnooze(ids: string[], dueDate: string) {
     .in('id', ids)
     .eq('user_id', userId);
 
+  if (dbError) return { error: 'Failed to snooze.' };
+  bust();
+  return { success: true };
+}
+
+// ── Update blocked ─────────────────────────────────────────────────────────────
+
+export async function updateCommitmentBlocked(id: string, blocked: boolean) {
+  const { error, userId } = await requireUser();
+  if (error) return { error };
+  if (!id || typeof id !== 'string') return { error: 'Invalid ID.' };
+
+  const { error: dbError } = await supabaseAdmin
+    .from('commitments')
+    .update({ blocked })
+    .eq('id', id)
+    .eq('user_id', userId);
+
+  if (dbError) return { error: 'Failed to update blocked status.' };
+  bust();
+  return { success: true };
+}
+
+// ── Bulk mark done (filtered — for cross-page selection) ──────────────────────
+
+export async function bulkMarkDoneWhere(params: {
+  status: string; direction: string; q: string; todayStr: string;
+}) {
+  const { error, userId } = await requireUser();
+  if (error) return { error };
+
+  let q = supabaseAdmin
+    .from('commitments')
+    .update({ status: 'done', resolved_at: new Date().toISOString() })
+    .eq('user_id', userId);
+
+  if (params.direction !== 'all') q = q.eq('direction', params.direction);
+
+  if (params.status === 'overdue') {
+    q = q.eq('status', 'open').not('due_date', 'is', null).lt('due_date', params.todayStr);
+  } else {
+    q = q.eq('status', params.status);
+  }
+
+  if (params.q.trim()) {
+    q = q.or(
+      `description.ilike.%${params.q.trim()}%,counterparty.ilike.%${params.q.trim()}%,note.ilike.%${params.q.trim()}%`,
+    );
+  }
+
+  const { error: dbError } = await q;
+  if (dbError) return { error: 'Failed to mark done.' };
+  bust();
+  return { success: true };
+}
+
+// ── Bulk dismiss (filtered — for cross-page selection) ────────────────────────
+
+export async function bulkDismissWhere(params: {
+  status: string; direction: string; q: string; todayStr: string;
+}) {
+  const { error, userId } = await requireUser();
+  if (error) return { error };
+
+  let q = supabaseAdmin
+    .from('commitments')
+    .update({ status: 'dismissed', resolved_at: new Date().toISOString() })
+    .eq('user_id', userId);
+
+  if (params.direction !== 'all') q = q.eq('direction', params.direction);
+
+  if (params.status === 'overdue') {
+    q = q.eq('status', 'open').not('due_date', 'is', null).lt('due_date', params.todayStr);
+  } else {
+    q = q.eq('status', params.status);
+  }
+
+  if (params.q.trim()) {
+    q = q.or(
+      `description.ilike.%${params.q.trim()}%,counterparty.ilike.%${params.q.trim()}%,note.ilike.%${params.q.trim()}%`,
+    );
+  }
+
+  const { error: dbError } = await q;
+  if (dbError) return { error: 'Failed to dismiss.' };
+  bust();
+  return { success: true };
+}
+
+// ── Bulk snooze (filtered — for cross-page selection) ─────────────────────────
+
+export async function bulkSnoozeWhere(params: {
+  status: string; direction: string; q: string; todayStr: string; dueDate: string;
+}) {
+  const { error, userId } = await requireUser();
+  if (error) return { error };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(params.dueDate)) return { error: 'Invalid date format.' };
+
+  let q = supabaseAdmin
+    .from('commitments')
+    .update({ due_date: params.dueDate })
+    .eq('user_id', userId);
+
+  if (params.direction !== 'all') q = q.eq('direction', params.direction);
+
+  if (params.status === 'overdue') {
+    q = q.eq('status', 'open').not('due_date', 'is', null).lt('due_date', params.todayStr);
+  } else {
+    q = q.eq('status', params.status);
+  }
+
+  if (params.q.trim()) {
+    q = q.or(
+      `description.ilike.%${params.q.trim()}%,counterparty.ilike.%${params.q.trim()}%,note.ilike.%${params.q.trim()}%`,
+    );
+  }
+
+  const { error: dbError } = await q;
   if (dbError) return { error: 'Failed to snooze.' };
   bust();
   return { success: true };

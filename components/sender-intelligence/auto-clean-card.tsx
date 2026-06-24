@@ -2,11 +2,11 @@
 
 import { useState, useTransition } from 'react';
 import { toast }        from 'sonner';
-import { Moon, Play, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Play, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { Button }       from '@/components/ui/button';
 import { cn }           from '@/lib/utils';
 import { saveExtensionPrefs }                      from '@/app/actions/extension-prefs';
-import { runAutoCleanNow, estimateAutoCleanNow, type AutoCleanResult } from '@/app/actions/engagement';
+import { runAutoCleanNow, estimateAutoCleanNow, type AutoCleanResult, type AutoCleanRuleSpec } from '@/app/actions/engagement';
 
 // ── Tiny toggle ───────────────────────────────────────────────────────────────
 
@@ -35,7 +35,7 @@ function Toggle({
   );
 }
 
-// ── Row helpers ───────────────────────────────────────────────────────────────
+// ── Row ───────────────────────────────────────────────────────────────────────
 
 function Row({
   label, description, checked, onChange, disabled, children,
@@ -130,13 +130,12 @@ export function AutoCleanCard({ initialPrefs }: { initialPrefs: AutoCleanPrefs }
   const [estimates,   setEstimates]   = useState<Record<string, number> | null>(null);
   const [runResults,  setRunResults]  = useState<AutoCleanResult | null>(null);
   const [runError,    setRunError]    = useState<string | null>(null);
-  const [lookbackVal, setLookbackVal] = useState<string>('default'); // 'default' | number string
+  const [lookbackVal, setLookbackVal] = useState<string>('default');
 
   const hasEnabledRules = calendar || otp || promo || shipping || social;
-
   const lookBackDays = lookbackVal === 'default' ? null : Number(lookbackVal);
 
-  const currentRules = {
+  const currentRules: AutoCleanRuleSpec = {
     calendar:       { enabled: calendar, days_after: Number(calendarDays) || 7 },
     otp:            { enabled: otp },
     promo:          { enabled: promo,    days_after: Number(promoDays)    || 60 },
@@ -201,18 +200,6 @@ export function AutoCleanCard({ initialPrefs }: { initialPrefs: AutoCleanPrefs }
     <div className="px-6 pt-6 pb-4">
       <div className="rounded-lg border border-border bg-card">
 
-        {/* Header */}
-        <div className="flex items-start gap-3 px-4 pt-4 pb-3 border-b border-border">
-          <Moon className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium">Nightly Auto-Clean</p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Automatically trash expired or stale emails every night. Messages go to Gmail
-              Trash — recoverable for 30 days.
-            </p>
-          </div>
-        </div>
-
         {/* Rules */}
         <div className="divide-y divide-border">
 
@@ -262,10 +249,9 @@ export function AutoCleanCard({ initialPrefs }: { initialPrefs: AutoCleanPrefs }
 
         </div>
 
-        {/* Clean now */}
+        {/* Clean now — one-time run across all enabled rules */}
         <div className="px-4 py-3 border-t border-border bg-muted/40 space-y-3">
 
-          {/* Header row — always visible */}
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <p className="text-sm font-medium flex items-center gap-1.5">
@@ -273,10 +259,9 @@ export function AutoCleanCard({ initialPrefs }: { initialPrefs: AutoCleanPrefs }
                 Clean now
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                One-time run — independent of the nightly schedule.
+                One-time run across all enabled rules — independent of the nightly schedule.
               </p>
 
-              {/* Look-back override — only in idle state */}
               {runState === 'idle' && (
                 <div className="flex items-center gap-1.5 mt-2.5">
                   <span className="text-xs text-muted-foreground">Look back:</span>

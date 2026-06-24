@@ -11,6 +11,9 @@ import {
   ShieldAlert, ShieldQuestion, Plus, Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog';
 import { cn }     from '@/lib/utils';
 import {
   enableScreener, disableScreener, getScreenerQueue, reviewScreenerBatch,
@@ -30,10 +33,11 @@ export function ScreenerTab() {
   const [toggling, setToggling] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [reviewing,       setReviewing]       = useState(false);
-  const [showWhitelist,   setShowWhitelist]   = useState(false);
-  const [newDomain,       setNewDomain]       = useState('');
-  const [whitelistBusy,   setWhitelistBusy]   = useState(false);
+  const [reviewing,           setReviewing]           = useState(false);
+  const [showWhitelist,       setShowWhitelist]       = useState(false);
+  const [newDomain,           setNewDomain]           = useState('');
+  const [whitelistBusy,       setWhitelistBusy]       = useState(false);
+  const [pendingRiskyApproval, setPendingRiskyApproval] = useState<ScreenerSender | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -294,7 +298,7 @@ export function ScreenerTab() {
 
       {!settings.enabled && (
         <div className="px-6 py-6 flex-1">
-          <div className="max-w-lg">
+          <div className="pl-6 max-w-lg">
             <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-900 mb-6">
               <Info className="w-4 h-4 shrink-0 mt-0.5 text-blue-600" />
               <div className="space-y-1">
@@ -419,24 +423,85 @@ export function ScreenerTab() {
                       s.lookalike_of ? 2 :
                       (s.trust_signals?.spf === 'fail' || s.trust_signals?.dkim === 'fail') ? 1 : 0;
                     return riskScore(b) - riskScore(a);
-                  }).map((sender) => (
-                    <ScreenerRow
-                      key={sender.sender_email}
-                      sender={sender}
-                      isSelected={selected.has(sender.sender_email)}
-                      onToggle={() => toggleRow(sender.sender_email)}
-                      onApprove={() => handleReview([sender.sender_email], 'approved')}
-                      onApproveAndWhitelist={() => handleApproveAndWhitelist(sender)}
-                      onBlock={() => handleReview([sender.sender_email], 'blocked')}
-                      reviewing={reviewing || whitelistBusy}
-                    />
-                  ))}
+                  }).map((sender) => {
+                    const isRisky = !!sender.lookalike_of ||
+                      sender.trust_signals?.spf === 'fail' ||
+                      sender.trust_signals?.dkim === 'fail';
+                    return (
+                      <ScreenerRow
+                        key={sender.sender_email}
+                        sender={sender}
+                        isSelected={selected.has(sender.sender_email)}
+                        onToggle={() => toggleRow(sender.sender_email)}
+                        onApprove={() => isRisky
+                          ? setPendingRiskyApproval(sender)
+                          : handleReview([sender.sender_email], 'approved')
+                        }
+                        onApproveAndWhitelist={() => handleApproveAndWhitelist(sender)}
+                        onBlock={() => handleReview([sender.sender_email], 'blocked')}
+                        reviewing={reviewing || whitelistBusy}
+                      />
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
         </>
       )}
+
+      {/* ── Risky sender approval confirmation dialog ───────────────────────── */}
+      <Dialog open={!!pendingRiskyApproval} onOpenChange={(open) => { if (!open) setPendingRiskyApproval(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-700">
+              <ShieldAlert className="w-5 h-5 text-amber-600" />
+              Approve risky sender?
+            </DialogTitle>
+          </DialogHeader>
+          {pendingRiskyApproval && (
+            <div className="space-y-3 text-sm">
+              <p className="text-muted-foreground">
+                <strong className="text-foreground">{pendingRiskyApproval.sender_name || pendingRiskyApproval.sender_email}</strong> has been flagged as potentially unsafe:
+              </p>
+              <ul className="space-y-1.5 pl-4">
+                {pendingRiskyApproval.lookalike_of && (
+                  <li className="flex items-start gap-2 text-red-700">
+                    <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                    Domain resembles <strong>{pendingRiskyApproval.lookalike_of}</strong> — possible impersonation
+                  </li>
+                )}
+                {(pendingRiskyApproval.trust_signals?.spf === 'fail' || pendingRiskyApproval.trust_signals?.dkim === 'fail') && (
+                  <li className="flex items-start gap-2 text-orange-700">
+                    <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                    Failed email authentication (SPF: {pendingRiskyApproval.trust_signals?.spf ?? '—'} · DKIM: {pendingRiskyApproval.trust_signals?.dkim ?? '—'})
+                  </li>
+                )}
+              </ul>
+              <p className="text-muted-foreground text-xs">
+                Approving will move their email to your inbox. You can block them later from Senders if needed.
+              </p>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setPendingRiskyApproval(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="default"
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={() => {
+                if (pendingRiskyApproval) {
+                  handleReview([pendingRiskyApproval.sender_email], 'approved');
+                  setPendingRiskyApproval(null);
+                }
+              }}
+            >
+              Approve anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

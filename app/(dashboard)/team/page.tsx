@@ -21,10 +21,11 @@ function fmtDate(iso: string) {
 }
 
 export default async function TeamPage() {
-  const session = await auth();
-  const role    = session?.user?.orgRole;
+  const session   = await auth();
+  const role      = session?.user?.orgRole;
+  const planTier  = session?.user?.planTier;
 
-  if (role !== 'admin' && role !== 'owner') redirect('/account');
+  if (planTier !== 'team' || (role !== 'admin' && role !== 'owner')) redirect('/account');
 
   const orgId = await getOrCreateOrg(
     session!.user.id,

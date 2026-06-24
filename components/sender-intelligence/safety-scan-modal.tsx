@@ -53,6 +53,8 @@ export function SafetyScanModal({ senderEmails, olderThanDays, emailCount, onCon
           <DialogTitle className="flex items-center gap-2">
             {scanning ? (
               <><Loader2 className="w-4 h-4 animate-spin text-primary" />Scanning for important emails…</>
+            ) : error ? (
+              <><AlertTriangle className="w-4 h-4 text-red-500" />Safety scan failed</>
             ) : findings.length > 0 ? (
               <><AlertTriangle className="w-4 h-4 text-amber-500" />Review before deleting</>
             ) : (
@@ -62,11 +64,13 @@ export function SafetyScanModal({ senderEmails, olderThanDays, emailCount, onCon
           <DialogDescription>
             {scanning
               ? `Claude is reviewing emails from ${senderEmails.length} sender${senderEmails.length !== 1 ? 's' : ''} for anything important.`
-              : findings.length > 0
-                ? `Found ${findings.length} item${findings.length !== 1 ? 's' : ''} worth reviewing before you delete ~${emailCount.toLocaleString()} emails.`
-                : skipped
-                  ? 'Could not scan emails. You can still proceed with the delete.'
-                  : `No important emails found across ${senderEmails.length} sender${senderEmails.length !== 1 ? 's' : ''}. Safe to proceed.`
+              : error
+                ? 'We couldn\'t check these emails for important content. Proceed only if you\'re sure these senders have no important emails.'
+                : findings.length > 0
+                  ? `Found ${findings.length} item${findings.length !== 1 ? 's' : ''} worth reviewing before you delete ~${emailCount.toLocaleString()} emails.`
+                  : skipped
+                    ? 'Could not scan emails. You can still proceed with the delete.'
+                    : `No important emails found across ${senderEmails.length} sender${senderEmails.length !== 1 ? 's' : ''}. Safe to proceed.`
             }
           </DialogDescription>
         </DialogHeader>
@@ -81,11 +85,17 @@ export function SafetyScanModal({ senderEmails, olderThanDays, emailCount, onCon
           </div>
         )}
 
-        {/* Error */}
+        {/* Scan error — distinct from "0 warnings found"; shown when the scan itself failed */}
         {error && (
-          <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
-            <AlertTriangle className="w-4 h-4 shrink-0" />
-            Scan failed: {error}. You can still proceed.
+          <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-300 rounded-lg text-sm text-red-900">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
+            <div className="space-y-1">
+              <p className="font-semibold">Safety scan could not complete</p>
+              <p className="text-red-800">
+                We couldn&apos;t check these emails for important content ({error}).
+                Proceed only if you&apos;re sure these senders have no important emails.
+              </p>
+            </div>
           </div>
         )}
 
@@ -123,15 +133,18 @@ export function SafetyScanModal({ senderEmails, olderThanDays, emailCount, onCon
 
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={onClose} disabled={scanning}>Cancel</Button>
+          {/* Destructive styling for all cases; label is more prominent when scan failed */}
           <Button
             variant="destructive"
             onClick={onConfirm}
             disabled={scanning}
           >
             <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-            {findings.length > 0
-              ? `Delete anyway (~${emailCount.toLocaleString()} emails)`
-              : `Delete ~${emailCount.toLocaleString()} emails`}
+            {error
+              ? `Delete anyway (scan failed — ~${emailCount.toLocaleString()} emails)`
+              : findings.length > 0
+                ? `Delete anyway (~${emailCount.toLocaleString()} emails)`
+                : `Delete ~${emailCount.toLocaleString()} emails`}
           </Button>
         </DialogFooter>
       </DialogContent>

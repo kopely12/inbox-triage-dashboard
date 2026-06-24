@@ -16,6 +16,7 @@ import {
   type BundleContents,
 } from '@/app/actions/bundle';
 import { BundlePanel } from '@/components/bundle/bundle-panel';
+import { useSession } from 'next-auth/react';
 
 const DASHBOARD_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3001';
 
@@ -45,6 +46,8 @@ function relativeDate(iso: string): string {
 
 export function BundleContentsTab() {
   const router = useRouter();
+  const { data: session } = useSession();
+  const gmailAcct = session?.user?.email ? encodeURIComponent(session.user.email) : '0';
   const [contents,  setContents]  = useState<BundleContents | null>(null);
   const [loading,   setLoading]   = useState(true);
   const [isPending, startTransition] = useTransition();
@@ -129,13 +132,20 @@ export function BundleContentsTab() {
 
   if (!contents?.enabled) {
     return (
-      <div className="flex-1 overflow-auto">
-        <div className="max-w-lg mx-auto px-6 py-6">
-          <h2 className="text-sm font-semibold mb-0.5">Email Bundles</h2>
-          <p className="text-xs text-muted-foreground mb-4">
-            Hold newsletters and low-priority senders out of your inbox and
-            deliver them as a single daily digest.
-          </p>
+      <div className="px-6 py-6 flex-1">
+        <div className="max-w-lg">
+          <div className="flex items-start gap-3 mb-5">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-primary/10">
+              <Package className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold">Email Bundles</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Hold newsletters and low-priority senders out of your inbox and
+                deliver them as a single daily digest.
+              </p>
+            </div>
+          </div>
           <BundlePanel />
         </div>
       </div>
@@ -149,9 +159,14 @@ export function BundleContentsTab() {
     return (
       <div className="flex flex-col flex-1 overflow-auto">
         <div className="flex items-start justify-between px-6 py-4 border-b border-border shrink-0">
-          <div>
-            <h2 className="text-sm font-semibold">Bundle</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">No emails held</p>
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-primary/10">
+              <Package className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold">Bundle</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">No emails held</p>
+            </div>
           </div>
           <Button
             variant={contents.paused ? 'default' : 'outline'}
@@ -196,7 +211,11 @@ export function BundleContentsTab() {
 
       {/* Header */}
       <div className="flex items-start justify-between px-6 py-4 border-b border-border shrink-0">
-        <div>
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-primary/10">
+            <Package className="w-5 h-5 text-primary" />
+          </div>
+          <div>
           <h2 className="text-sm font-semibold">Bundle</h2>
           <div className="flex items-center gap-1.5 mt-0.5 text-xs text-muted-foreground flex-wrap">
             <Package className="w-3.5 h-3.5" />
@@ -213,6 +232,7 @@ export function BundleContentsTab() {
                 </span>
               </>
             )}
+          </div>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
@@ -297,7 +317,7 @@ export function BundleContentsTab() {
         {/* Footer nudge to Gmail */}
         <div className="px-6 py-4 border-t border-border">
           <a
-            href="https://mail.google.com"
+            href={`https://mail.google.com/mail/u/${gmailAcct}/`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"

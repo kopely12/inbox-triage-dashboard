@@ -109,7 +109,7 @@ export async function inviteMember(formData: FormData) {
   if (error) return { error: 'Failed to create invite. They may already be invited.' };
 
   revalidatePath('/team');
-  const baseUrl = process.env.NEXTAUTH_URL ?? 'https://inbox-triage-dashboard.vercel.app';
+  const baseUrl = process.env.NEXTAUTH_URL ?? 'https://my.iinbox.io';
   return { success: true, inviteUrl: `${baseUrl}/invite/${token}` };
 }
 

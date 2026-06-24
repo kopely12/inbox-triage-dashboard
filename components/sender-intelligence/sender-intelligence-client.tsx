@@ -2,13 +2,15 @@
 
 import { useState, useEffect, useCallback, useTransition, useMemo, useRef } from 'react';
 import { useRouter }        from 'next/navigation';
+import { useSession }       from 'next-auth/react';
 import { toast }            from 'sonner';
 import {
-  RefreshCw, Inbox, Trash2, Archive, BellOff, Undo2,
-  ChevronDown, AlertTriangle, CheckCircle2, Loader2,
+  Inbox, Trash2, Archive, BellOff, Undo2,
+  ChevronDown, ChevronUp, AlertTriangle, CheckCircle2, Loader2,
   MailX, Filter, Download, Sparkles, TriangleAlert,
-  Layers, Eye, History, X, RotateCcw, MoreHorizontal,
-  HardDrive, Zap, Shield, ListChecks, SlidersHorizontal, Package, Search, ArrowUpDown,
+  Layers, Info, ExternalLink, History, X, RotateCcw, MoreHorizontal,
+  Zap, Shield, ListChecks, SlidersHorizontal, Package, Search, ArrowUpDown,
+  Activity,
 } from 'lucide-react';
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -25,23 +27,25 @@ import {
 import { cn } from '@/lib/utils';
 import {
   triggerRefresh, getEngagementStatus, executeBulkAction,
-  getActionHistory, undoAction, getSenderPreview, describeSenders, getNoiseBriefing,
+  getActionHistory, undoAction, getNoiseBriefing,
   getInboxHealth,
-  type ActionResult, type ActionHistoryItem, type SenderPreview,
+  type ActionResult, type ActionHistoryItem,
   type CleanupJob, type NoiseBriefing, type OptOutSender, type EmailTypeStat,
+  type InboxHealthData,
 } from '@/app/actions/engagement';
 import { addSendersToBundle } from '@/app/actions/bundle';
+import { InboxHealthClient } from '@/components/inbox-health/inbox-health-client';
+import type { InboxAlert } from '@/app/actions/protection';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { StorageTab }        from './storage-tab';
-import { DeepCleanPanel }    from './deep-clean-panel';
+import { DeepCleanPanel } from './deep-clean-panel';
 import { ScreenerTab }       from './screener-tab';
 import { AutomationTab }            from './automation-tab';
-import { FilterAuditTab }           from './filter-audit-tab';
 import { CadenceSuggestionsPanel } from './cadence-suggestions-panel';
 import { NewSenderDigest }        from './new-sender-digest';
-import { RecommendationsFeed }    from './recommendations-feed';
+import { RecommendationsButton }  from './recommendations-feed';
 import { ActiveJobBanner, JobsPanel } from './jobs-panel';
 import { SafetyScanModal }  from './safety-scan-modal';
-import { AutoCleanCard }    from './auto-clean-card';
 import { isDormant } from './dormant-senders-tab';
 import { BundleContentsTab }           from '@/components/bundle/bundle-contents-tab';
 import { SendersTable, type FullSenderRow } from '@/components/senders/senders-table';
@@ -75,6 +79,7 @@ export type SenderRow = {
   emails_forwarded:      number;
   engagement_score:      number | null;
   opt_out_replied_at:    string | null;
+  ai_description:        string | null;
 };
 
 export type Summary = {
@@ -108,8 +113,9 @@ interface Props {
   triageBySender?:       Record<string, { reply_count: number; dismiss_count: number }>;
   recentUnsubscribes?:   RecentUnsubscribe[];
   userDomain?:           string | null;
-  autoCleanPrefs?:       { auto_clean_calendar: boolean; auto_clean_calendar_days: number; auto_clean_otp: boolean; auto_clean_promo: boolean; auto_clean_promo_days: number; auto_clean_shipping: boolean; auto_clean_social: boolean };
   failedUnsubscribes?:   FailedUnsub[];
+  health?:               InboxHealthData | null;
+  initialAlerts?:        InboxAlert[];
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -184,7 +190,11 @@ const CATEGORY_SEVERITY: Record<string, number> = {
   never_engage: 0, rarely_engage: 1, regular: 2, transactional: 3, known_contact: 4,
 };
 
-function groupByDomain(senders: SenderRow[]): DomainGroup[] {
+function groupByDomain(
+  senders: SenderRow[],
+  sortKey: 'volume' | 'open_rate' | 'last_email' | 'name' | 'trashed' = 'volume',
+  sortDir: 'asc' | 'desc' = 'desc',
+): DomainGroup[] {
   const map = new Map<string, SenderRow[]>();
   for (const s of senders) {
     const domain = s.sender_domain || s.sender_email.split('@')[1] || s.sender_email;
@@ -198,13 +208,30 @@ function groupByDomain(senders: SenderRow[]): DomainGroup[] {
     }, group[0].category);
     return {
       domain,
-      senders:        group,
-      totalEmails:    group.reduce((n, s) => n + s.emails_received, 0),
-      maxEngagement:  Math.max(...group.map((s) => s.engagement_rate ?? 0)),
-      category:       worst,
+      senders:          group,
+      totalEmails:      group.reduce((n, s) => n + s.emails_received, 0),
+      maxEngagement:    Math.max(...group.map((s) => s.engagement_rate ?? 0)),
+      category:         worst,
       hasTransactional: group.some((s) => s.category === 'transactional'),
     };
-  }).sort((a, b) => b.totalEmails - a.totalEmails);
+  }).sort((a, b) => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    switch (sortKey) {
+      case 'open_rate':  return dir * (a.maxEngagement - b.maxEngagement);
+      case 'trashed': {
+        const aRate = Math.max(...a.senders.map((s) => (s.emails_deleted ?? 0) / Math.max(s.emails_received, 1)));
+        const bRate = Math.max(...b.senders.map((s) => (s.emails_deleted ?? 0) / Math.max(s.emails_received, 1)));
+        return dir * (aRate - bRate);
+      }
+      case 'last_email': {
+        const at = Math.max(...a.senders.map((s) => s.last_email_date ? new Date(s.last_email_date).getTime() : 0));
+        const bt = Math.max(...b.senders.map((s) => s.last_email_date ? new Date(s.last_email_date).getTime() : 0));
+        return dir * (at - bt);
+      }
+      case 'name':   return dir * a.domain.localeCompare(b.domain);
+      default:       return dir * (a.totalEmails - b.totalEmails); // volume
+    }
+  });
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -372,13 +399,29 @@ function ConfirmModal({
                 Their emails will not be affected.
               </>
             )}
-            {state.action === 'clean_never_engage' && (
-              <>
-                For <strong>{senderCount} Never Open {plural}</strong>: unsubscribe those with
-                unsubscribe links, and optionally delete all their emails.
-                This is the fastest way to clear inbox noise.
-              </>
-            )}
+            {state.action === 'clean_never_engage' && (() => {
+              const withLink    = state.senders.filter((s) => s.has_unsubscribe_header).length;
+              const withoutLink = senderCount - withLink;
+              return (
+                <>
+                  <strong>{senderCount} Never Open {plural}</strong> will be cleaned up:
+                  <ul className="mt-2 space-y-1 list-none">
+                    {withLink > 0 && (
+                      <li className="flex items-start gap-1.5">
+                        <span className="mt-0.5 text-muted-foreground">•</span>
+                        <span><strong>{withLink}</strong> with unsubscribe links — will be unsubscribed and their emails deleted</span>
+                      </li>
+                    )}
+                    {withoutLink > 0 && (
+                      <li className="flex items-start gap-1.5">
+                        <span className="mt-0.5 text-muted-foreground">•</span>
+                        <span><strong>{withoutLink}</strong> without unsubscribe links — emails deleted only</span>
+                      </li>
+                    )}
+                  </ul>
+                </>
+              );
+            })()}
             {state.action === 'report_spam' && (
               <>
                 Move all emails from <strong>{senderCount} {plural}</strong> to spam.
@@ -391,6 +434,29 @@ function ConfirmModal({
             )}
           </DialogDescription>
         </DialogHeader>
+
+        {/* Sender list — shown when multiple senders are targeted */}
+        {senderCount > 1 && (
+          <div className="rounded-md border border-border bg-muted/30 overflow-hidden">
+            <div className="max-h-40 overflow-y-auto divide-y divide-border">
+              {state.senders.map((s) => (
+                <div key={s.sender_email} className="flex items-center justify-between px-3 py-1.5 gap-3">
+                  <div className="min-w-0">
+                    <span className="text-xs font-medium truncate block">
+                      {s.sender_name || s.sender_email}
+                    </span>
+                    {s.sender_name && (
+                      <span className="text-[11px] text-muted-foreground truncate block">{s.sender_email}</span>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-muted-foreground shrink-0 tabular-nums">
+                    {s.emails_received.toLocaleString()} emails
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Protected contact warning — shown when any targeted sender has open commitments */}
         {atRiskSenders.length > 0 && (
@@ -407,58 +473,77 @@ function ConfirmModal({
           </div>
         )}
 
-        {/* "Also delete emails" checkbox — shown for unsubscribe actions */}
-        {(state.action === 'unsubscribe') && onToggleDeleteExisting && (
-          <label className="flex items-center gap-2 text-sm cursor-pointer mt-1">
-            <input
-              type="checkbox"
-              checked={state.deleteExisting ?? false}
-              onChange={(e) => onToggleDeleteExisting(e.target.checked)}
-              className="rounded border-gray-300"
-            />
-            <span>Also move existing emails from {senderCount > 1 ? 'these senders' : 'this sender'} to trash</span>
-          </label>
-        )}
+        {/* Advanced options — collapsed by default to reduce decision fatigue.
+            "Also delete" and "delete scope" are power-user controls; most users
+            should just confirm with the defaults. */}
+        {((state.action === 'unsubscribe' && onToggleDeleteExisting) ||
+          (onChangeOlderThanDays && (
+            state.action === 'bulk_delete' ||
+            state.action === 'clean_never_engage' ||
+            (state.action === 'unsubscribe' && state.deleteExisting)
+          ))) && (
+          <details className="mt-2 text-sm">
+            <summary className="cursor-pointer select-none text-muted-foreground hover:text-foreground transition-colors list-none flex items-center gap-1">
+              <ChevronDown className="w-3.5 h-3.5 transition-transform [[open]_&]:rotate-180" />
+              More options
+            </summary>
 
-        {/* Delete scope — shown for bulk_delete, clean_never_engage, or unsubscribe+deleteExisting */}
-        {onChangeOlderThanDays && (
-          (state.action === 'bulk_delete' ||
-           state.action === 'clean_never_engage' ||
-           (state.action === 'unsubscribe' && state.deleteExisting))
-        ) && (
-          <div className="mt-3 space-y-2">
-            <p className="text-sm font-medium">Which emails to delete:</p>
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input
-                type="radio"
-                name="delete-scope"
-                checked={state.olderThanDays !== null && state.olderThanDays !== undefined}
-                onChange={() => onChangeOlderThanDays(state.olderThanDays ?? 90)}
-                className="text-primary"
-              />
-              <span>Older than</span>
-              <input
-                type="number"
-                min={1}
-                max={3650}
-                value={state.olderThanDays ?? 90}
-                onChange={(e) => onChangeOlderThanDays(Math.max(1, parseInt(e.target.value) || 90))}
-                onClick={() => onChangeOlderThanDays(state.olderThanDays ?? 90)}
-                className="w-16 px-2 py-0.5 text-sm border border-border rounded text-center"
-              />
-              <span>days <span className="text-muted-foreground">(recommended)</span></span>
-            </label>
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input
-                type="radio"
-                name="delete-scope"
-                checked={state.olderThanDays === null}
-                onChange={() => onChangeOlderThanDays(null)}
-                className="text-primary"
-              />
-              <span>All emails from {senderCount > 1 ? 'these senders' : 'this sender'}</span>
-            </label>
-          </div>
+            <div className="mt-2 pl-1 space-y-3 border-l-2 border-border ml-1 pl-3">
+              {/* "Also delete emails" checkbox — unsubscribe only */}
+              {state.action === 'unsubscribe' && onToggleDeleteExisting && (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={state.deleteExisting ?? false}
+                    onChange={(e) => onToggleDeleteExisting(e.target.checked)}
+                    className="rounded border-gray-300"
+                  />
+                  <span>Also move existing emails from {senderCount > 1 ? 'these senders' : 'this sender'} to trash</span>
+                </label>
+              )}
+
+              {/* Delete scope — bulk_delete, clean_never_engage, or unsubscribe+deleteExisting */}
+              {onChangeOlderThanDays && (
+                state.action === 'bulk_delete' ||
+                state.action === 'clean_never_engage' ||
+                (state.action === 'unsubscribe' && state.deleteExisting)
+              ) && (
+                <div className="space-y-1.5">
+                  <p className="font-medium text-foreground">Which emails to delete:</p>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="delete-scope"
+                      checked={state.olderThanDays !== null && state.olderThanDays !== undefined}
+                      onChange={() => onChangeOlderThanDays(state.olderThanDays ?? 90)}
+                      className="text-primary"
+                    />
+                    <span>Older than</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={3650}
+                      value={state.olderThanDays ?? 90}
+                      onChange={(e) => onChangeOlderThanDays(Math.max(1, parseInt(e.target.value) || 90))}
+                      onClick={() => onChangeOlderThanDays(state.olderThanDays ?? 90)}
+                      className="w-16 px-2 py-0.5 text-sm border border-border rounded text-center"
+                    />
+                    <span>days <span className="text-muted-foreground">(recommended)</span></span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="delete-scope"
+                      checked={state.olderThanDays === null}
+                      onChange={() => onChangeOlderThanDays(null)}
+                      className="text-primary"
+                    />
+                    <span>All emails from {senderCount > 1 ? 'these senders' : 'this sender'}</span>
+                  </label>
+                </div>
+              )}
+            </div>
+          </details>
         )}
 
         {/* Sender list (capped at 5) */}
@@ -500,7 +585,6 @@ function ConfirmModal({
 // ── Category Tabs ──────────────────────────────────────────────────────────────
 
 const CATEGORIES = [
-  { key: 'all',              label: 'All' },
   { key: 'never_engage',     label: 'Never Open' },
   { key: 'rarely_engage',    label: 'Rarely Open' },
   { key: 'lapsed',           label: '📉 Lapsed' },
@@ -509,17 +593,9 @@ const CATEGORIES = [
   { key: 'transactional',    label: 'Transactional' },
   { key: 'still_receiving',  label: 'Still Receiving' },
   { key: 'high_delete_rate', label: '🗑 High delete rate' },
+  { key: 'all',              label: 'All' },
 ] as const;
 
-const TYPE_FILTERS = [
-  { key: 'promotion',  label: '🔥 Promotions'  },
-  { key: 'newsletter', label: '📰 Newsletters' },
-  { key: 'receipt',    label: '📦 Receipts'    },
-  { key: 'alert',      label: '🔔 Alerts'      },
-  { key: 'social',     label: '👥 Social'      },
-  { key: 'update',     label: '🔄 Updates'     },
-  { key: 'personal',   label: '👤 Personal'    },
-];
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
@@ -539,27 +615,38 @@ export function SenderIntelligenceClient({
   triageBySender       = {},
   recentUnsubscribes   = [],
   userDomain           = null,
-  autoCleanPrefs       = { auto_clean_calendar: false, auto_clean_calendar_days: 7, auto_clean_otp: false, auto_clean_promo: false, auto_clean_promo_days: 60, auto_clean_shipping: false, auto_clean_social: false },
   failedUnsubscribes   = [] as FailedUnsub[],
+  health               = null,
+  initialAlerts        = [],
 }: Props) {
   const router = useRouter();
+  const { data: session } = useSession();
+  const gmailAcct = session?.user?.email ? encodeURIComponent(session.user.email) : '0';
 
   // Top-level navigation
-  const [activeTab, setActiveTab] = useState<'senders' | 'storage' | 'deep_clean' | 'screener' | 'dormant' | 'bundle' | 'automation'>('senders');
+  // Read initial tab from URL param so recommendation links within Noise Score work
+  type TopTab = 'noise_score' | 'senders' | 'deep_clean' | 'screener' | 'bundle' | 'automation';
+  const VALID_TOP_TABS: TopTab[] = ['noise_score', 'senders', 'deep_clean', 'screener', 'bundle', 'automation'];
+  const [activeTab, setActiveTab] = useState<TopTab>(() => {
+    if (typeof window === 'undefined') return 'noise_score';
+    const p = new URLSearchParams(window.location.search).get('tab') as TopTab | null;
+    return (p && VALID_TOP_TABS.includes(p)) ? p : 'noise_score';
+  });
+  const [deepCleanSubTab, setDeepCleanSubTab] = useState<'bulk' | 'storage'>('bulk');
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   // Local state
-  const [activeCategory,  setActiveCategory]  = useState<string>('all');
+  const [activeCategory,  setActiveCategory]  = useState<string>('never_engage');
   const [selected,         setSelected]        = useState<Set<string>>(new Set());
   const [confirmState,     setConfirmState]    = useState<ConfirmState | null>(null);
   const [refreshStatus,    setRefreshStatus]   = useState(initialRefreshStatus);
   const [isPending,        startTransition]    = useTransition();
   const [isRefreshing,     setIsRefreshing]    = useState(false);
-  const [groupByDomainOn,  setGroupByDomainOn] = useState(false);
+  const [groupByDomainOn,  setGroupByDomainOn] = useState(true);
   const [expandedDomains,  setExpandedDomains] = useState<Set<string>>(new Set());
-  const [activeTypeFilter, setActiveTypeFilter] = useState<string | null>(null);
   const [searchQuery,      setSearchQuery]      = useState('');
-  const [sortKey,          setSortKey]          = useState<'volume' | 'open_rate' | 'last_email' | 'name'>('volume');
+  const [sortKey,          setSortKey]          = useState<'volume' | 'open_rate' | 'last_email' | 'name' | 'trashed'>('volume');
+  const [sortDir,          setSortDir]          = useState<'asc' | 'desc'>('desc');
   const [noiseBaseline, setNoiseBaseline] = useState<{
     noise_percentage:   number;
     total_noise_emails: number;
@@ -569,11 +656,7 @@ export function SenderIntelligenceClient({
   const [showHistory,      setShowHistory]     = useState(false);
   const [history,          setHistory]         = useState<ActionHistoryItem[]>([]);
   const [historyLoading,   setHistoryLoading]  = useState(false);
-  const [previewSender,    setPreviewSender]   = useState<SenderRow | null>(null);
-  const [previewData,      setPreviewData]     = useState<SenderPreview | null>(null);
-  const [previewLoading,   setPreviewLoading]  = useState(false);
-  const [aiDescriptions,   setAiDescriptions]  = useState<Record<string, string>>({});
-  const [descriptionsLoaded, setDescriptionsLoaded] = useState(false);
+  const [aiDescriptions,    setAiDescriptions]   = useState<Record<string, string>>({});
   const [briefing,         setBriefing]        = useState<NoiseBriefing | null>(null);
   const [scanState,        setScanState]       = useState<{ senders: SenderRow[]; action: string; deleteExisting: boolean; olderThanDays: number | null } | null>(null);
   const [preActionScore,   setPreActionScore]  = useState<number | null>(null);
@@ -599,13 +682,17 @@ export function SenderIntelligenceClient({
     } catch {}
   }, []);
 
-  // ── Auto-analyze on first visit — new users don't need to find the button ───
+  // ── Auto-analyze: on first visit OR when data is stale (>1 h) ───────────────
 
   const autoAnalyzeFired = useRef(false);
   useEffect(() => {
-    if (refreshStatus === 'never' && !autoAnalyzeFired.current) {
+    if (isFree || autoAnalyzeFired.current) return;
+    const isNever  = refreshStatus === 'never';
+    const isStale  = refreshStatus === 'completed' && lastRefreshed !== null &&
+                     Date.now() - new Date(lastRefreshed).getTime() > 60 * 60 * 1000;
+    if (isNever || isStale) {
       autoAnalyzeFired.current = true;
-      handleRefresh();
+      handleRefresh(true); // silent — no toast on automatic refresh
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -621,21 +708,21 @@ export function SenderIntelligenceClient({
     });
   }, []);
 
-  // ── On-demand AI descriptions — only fires when user requests them ───────────
+  // ── AI descriptions — pre-generated during refresh, loaded from initialSenders ──
+  // Descriptions are populated by batchDescribeSenders() at the end of each
+  // engagement refresh run and stored in sender_engagement.ai_description.
+  // We hydrate the local state once from the server-rendered sender list.
+  useEffect(() => {
+    const initial: Record<string, string> = {};
+    for (const s of initialSenders) {
+      if (s.ai_description) initial[s.sender_email] = s.ai_description;
+    }
+    if (Object.keys(initial).length) setAiDescriptions(initial);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleLoadDescriptions = useCallback(() => {
-    if (descriptionsLoaded || !initialSenders.length) return;
-    setDescriptionsLoaded(true);
-    const emails = initialSenders.map((s) => s.sender_email).slice(0, 50);
-    describeSenders(emails).then(({ descriptions }) => {
-      if (!descriptions) return;
-      const clean: Record<string, string> = {};
-      for (const [k, v] of Object.entries(descriptions)) {
-        if (v != null) clean[k] = v;
-      }
-      setAiDescriptions((prev) => ({ ...prev, ...clean }));
-    });
-  }, [descriptionsLoaded, initialSenders]);
+  // ── Failed-sender retry state ─────────────────────────────────────────────────
+  // Stores senders that failed the last bulk action so the user can retry them.
+  const [failedSendersForRetry, setFailedSendersForRetry] = useState<SenderRow[]>([]);
 
   // ── Polling when running ─────────────────────────────────────────────────────
 
@@ -650,7 +737,7 @@ export function SenderIntelligenceClient({
         if (status.refresh_status === 'completed_with_errors') {
           toast.warning('Refresh completed with write errors — some sender data may be incomplete. Try refreshing again.');
         } else if (status.refresh_status === 'completed' && wasFirstRun) {
-          toast.success('Inbox scanned — autopilot is now active to handle future noise.', {
+          toast.success('Inbox scanned — sender rules are active to handle future noise.', {
             duration: 6000,
             description: 'We enabled a default rule that removes senders you consistently ignore.',
           });
@@ -684,14 +771,6 @@ export function SenderIntelligenceClient({
 
   // ── Preview loader ────────────────────────────────────────────────────────────
 
-  const handleOpenPreview = useCallback(async (sender: SenderRow) => {
-    setPreviewSender(sender);
-    setPreviewData(null);
-    setPreviewLoading(true);
-    const { preview } = await getSenderPreview(sender.sender_email);
-    setPreviewData(preview);
-    setPreviewLoading(false);
-  }, []);
 
   // ── Since last cleanup banner dismiss ───────────────────────────────────────
 
@@ -707,81 +786,76 @@ export function SenderIntelligenceClient({
 
   // ── Refresh trigger ──────────────────────────────────────────────────────────
 
-  const handleRefresh = useCallback(async () => {
+  const handleRefresh = useCallback(async (silent = false) => {
     setIsRefreshing(true);
     const result = await triggerRefresh();
     setIsRefreshing(false);
 
     if (result.status === 'started') {
       setRefreshStatus('running');
-      toast.success('Analysis started — this takes about 90 seconds.');
+      if (!silent) toast.success('Analysis started — this takes about 90 seconds.');
     } else if (result.status === 'already_running') {
       setRefreshStatus('running');
-      toast.info('Analysis is already in progress.');
     } else if (result.status === 'already_fresh') {
-      toast.info('Your data is already up to date.');
+      if (!silent) toast.info('Your data is already up to date.');
     } else {
-      toast.error(result.error ?? 'Could not start analysis.');
+      if (!silent) toast.error(result.error ?? 'Could not start analysis.');
     }
   }, []);
 
   // ── Filtered senders ─────────────────────────────────────────────────────────
 
+  const NOISE_CATEGORIES = new Set(['never_engage', 'rarely_engage']);
+
   const categoryFiltered = activeCategory === 'all'
-    ? initialSenders
+    ? initialSenders  // "All" means all senders — noise-only was a bug
     : activeCategory === 'still_receiving'
       ? initialSenders.filter(isStillReceiving)
       : activeCategory === 'lapsed'
         ? initialSenders.filter(isLapsed)
-        : activeCategory === 'dormant'
-          ? initialSenders.filter(isDormant).filter(
-              (s) => !userDomain || (s.sender_domain !== userDomain && !s.sender_email.endsWith('@' + userDomain)),
-            ).sort((a, b) => b.emails_received - a.emails_received)
-          : activeCategory === 'known_contact'
-            ? initialSenders.filter((s) => s.category === 'known_contact' || s.category === 'personal')
-            : activeCategory === 'high_delete_rate'
-              ? initialSenders.filter((s) => {
-                  const trashRate = (s.emails_deleted ?? 0) / Math.max(s.emails_received, 1);
-                  return trashRate >= 0.5 && s.emails_received >= 5 &&
-                    s.category !== 'transactional' && s.category !== 'known_contact';
-                })
-              : initialSenders.filter((s) => s.category === activeCategory);
-
-  const typeFiltered = activeTypeFilter
-    ? categoryFiltered.filter((s) =>
-        (typeStatsBySender[s.sender_email] ?? []).some((t) => t.email_type === activeTypeFilter)
-      )
-    : categoryFiltered;
+        : activeCategory === 'known_contact'
+          ? initialSenders.filter((s) => s.category === 'known_contact' || s.category === 'personal')
+          : activeCategory === 'high_delete_rate'
+            ? initialSenders.filter((s) => {
+                const trashRate = (s.emails_deleted ?? 0) / Math.max(s.emails_received, 1);
+                return trashRate >= 0.5 && s.emails_received >= 5 &&
+                  s.category !== 'transactional' && s.category !== 'known_contact';
+              })
+            : initialSenders.filter((s) => s.category === activeCategory);
 
   const searchFiltered = searchQuery.trim()
     ? (() => {
         const q = searchQuery.toLowerCase().trim();
-        return typeFiltered.filter((s) =>
+        return categoryFiltered.filter((s) =>
           (s.sender_name  ?? '').toLowerCase().includes(q) ||
           s.sender_email.toLowerCase().includes(q) ||
           (s.sender_domain ?? '').toLowerCase().includes(q),
         );
       })()
-    : typeFiltered;
+    : categoryFiltered;
 
-  const filteredSenders = activeCategory === 'dormant'
-    ? searchFiltered  // dormant already sorted by volume in categoryFiltered
-    : [...searchFiltered].sort((a, b) => {
-        switch (sortKey) {
-          case 'open_rate':  return (a.engagement_rate ?? 0) - (b.engagement_rate ?? 0);
-          case 'last_email': {
-            const at = a.last_email_date ? new Date(a.last_email_date).getTime() : 0;
-            const bt = b.last_email_date ? new Date(b.last_email_date).getTime() : 0;
-            return bt - at;
-          }
-          case 'name': {
-            const an = (a.sender_name || a.sender_email).toLowerCase();
-            const bn = (b.sender_name || b.sender_email).toLowerCase();
-            return an.localeCompare(bn);
-          }
-          default: return b.emails_received - a.emails_received; // volume
-        }
-      });
+  const filteredSenders = [...searchFiltered].sort((a, b) => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    switch (sortKey) {
+      case 'open_rate':  return dir * ((a.engagement_rate ?? 0) - (b.engagement_rate ?? 0));
+      case 'trashed': {
+        const aRate = (a.emails_deleted ?? 0) / Math.max(a.emails_received, 1);
+        const bRate = (b.emails_deleted ?? 0) / Math.max(b.emails_received, 1);
+        return dir * (aRate - bRate);
+      }
+      case 'last_email': {
+        const at = a.last_email_date ? new Date(a.last_email_date).getTime() : 0;
+        const bt = b.last_email_date ? new Date(b.last_email_date).getTime() : 0;
+        return dir * (at - bt);
+      }
+      case 'name': {
+        const an = (a.sender_name || a.sender_email).toLowerCase();
+        const bn = (b.sender_name || b.sender_email).toLowerCase();
+        return dir * an.localeCompare(bn);
+      }
+      default: return dir * (a.emails_received - b.emails_received); // volume
+    }
+  });
 
   // ── Selection helpers ────────────────────────────────────────────────────────
 
@@ -946,10 +1020,54 @@ export function SenderIntelligenceClient({
       setConfirmState(null);
 
       const msg = succeeded > 0
-        ? `Done — ${succeeded} sender${succeeded > 1 ? 's' : ''} updated.`
+        ? `${succeeded} sender${succeeded > 1 ? 's' : ''} updated successfully.`
         : 'No changes made.';
-      if (failed > 0) toast.warning(`${msg} ${failed} failed.`);
-      else toast.success(msg);
+
+      const REVERSIBLE = new Set(['unsubscribe', 'auto_archive', 'mark_never_engage']);
+      const canUndo    = REVERSIBLE.has(action) && succeeded > 0;
+
+      if (failed > 0) {
+        // Identify which senders failed by process of elimination.
+        // (API doesn't return per-sender failure details so we approximate:
+        //  the last `failed` senders in the batch are assumed to have failed.)
+        const failedRows = targetSenders.slice(targetSenders.length - failed);
+        setFailedSendersForRetry(failedRows);
+
+        const failedNames = failedRows.slice(0, 3).map((s) => s.sender_name || s.sender_email);
+        const failedLabel = failedRows.length > 3
+          ? `${failedNames.join(', ')} +${failedRows.length - 3} more`
+          : failedNames.join(', ');
+
+        toast.warning(`${msg} ${failed} sender${failed > 1 ? 's' : ''} failed: ${failedLabel}`, {
+          duration: 10000,
+          action: failedRows.length > 0 ? {
+            label: 'Retry failed',
+            onClick: () => {
+              openConfirm(action, failedRows);
+            },
+          } : undefined,
+        });
+      } else if (canUndo) {
+        // Offer undo by fetching the just-created action IDs from history
+        toast.success(msg, {
+          duration: 8000,
+          action: {
+            label: 'Undo',
+            onClick: async () => {
+              const { actions: hist } = await getActionHistory();
+              const toUndo = (hist ?? [])
+                .filter((a: ActionHistoryItem) => a.action_type === action && a.status !== 'undone')
+                .slice(0, targetSenders.length);
+              if (!toUndo.length) { toast.error('Nothing to undo.'); return; }
+              await Promise.all(toUndo.map((a: ActionHistoryItem) => undoAction(a.id)));
+              toast.success(`Undone — ${toUndo.length} action${toUndo.length > 1 ? 's' : ''} reversed.`);
+              router.refresh();
+            },
+          },
+        });
+      } else {
+        toast.success(msg);
+      }
 
       // ── Post-cleanup health score celebration ─────────────────────────────
       if (succeeded > 0 && preActionScore !== null) {
@@ -982,9 +1100,6 @@ export function SenderIntelligenceClient({
     if (key === 'all')             return initialSenders.length;
     if (key === 'still_receiving') return initialSenders.filter(isStillReceiving).length;
     if (key === 'lapsed')          return initialSenders.filter(isLapsed).length;
-    if (key === 'dormant')         return initialSenders.filter(isDormant).filter(
-      (s) => !userDomain || (s.sender_domain !== userDomain && !s.sender_email.endsWith('@' + userDomain)),
-    ).length;
     if (key === 'known_contact')   return initialSenders.filter((s) => s.category === 'known_contact' || s.category === 'personal').length;
     if (key === 'opt_outs')        return optOutSenders.length + recentUnsubscribes.length;
     if (key === 'high_delete_rate') return initialSenders.filter((s) => {
@@ -1015,16 +1130,19 @@ export function SenderIntelligenceClient({
                 <Loader2 className="w-8 h-8 text-primary animate-spin" />
               </div>
             </div>
-            <h2 className="text-lg font-semibold mb-2">Scanning your inbox…</h2>
+            <h2 className="text-lg font-semibold mb-2">Analyzing your last {summary.period_days} days of email…</h2>
             <p className="text-muted-foreground text-sm">
-              We&apos;re analysing the last {summary.period_days} days of email to find senders
-              you never open, newsletters you could bundle, and noise you can clean up.
+              Finding senders you never open, newsletters you could bundle, and noise you can clean up.
               This takes about 90 seconds.
             </p>
-            <p className="text-xs text-muted-foreground mt-6">
-              The page will update automatically — you can open Gmail in the meantime.{' '}
+            <p className="text-xs text-muted-foreground mt-4">
+              You can navigate away — we&apos;ll keep analyzing in the background.
+              The page will update automatically when done.
+            </p>
+            <p className="text-xs text-muted-foreground mt-2">
+              Want to check email while you wait?{' '}
               <a
-                href="https://mail.google.com"
+                href={`https://mail.google.com/mail/u/${gmailAcct}/`}
                 target="_blank"
                 rel="noopener"
                 className="text-primary underline-offset-2 hover:underline"
@@ -1043,21 +1161,21 @@ export function SenderIntelligenceClient({
   const stillSendingCount = optOutSenders.filter((s) => s.resolution === 'still_sending').length;
 
   const PRIMARY_TABS = [
-    { key: 'senders'    as const, label: 'Senders',    icon: Inbox,             badge: null },
-    { key: 'deep_clean' as const, label: 'Deep Clean', icon: Zap,               badge: null },
-    { key: 'screener'   as const, label: 'Screener',   icon: Shield,            badge: null },
-    { key: 'bundle'     as const, label: 'Bundle',     icon: Package,           badge: null },
-    { key: 'automation' as const, label: 'Automation', icon: SlidersHorizontal, badge: null },
-    { key: 'storage'    as const, label: 'Storage',    icon: HardDrive,         badge: null },
+    { key: 'noise_score' as const, label: 'Noise Score', icon: Activity,          badge: null },
+    { key: 'senders'     as const, label: 'Senders',     icon: Inbox,             badge: null },
+    { key: 'deep_clean'  as const, label: 'Deep Clean',  icon: Zap,               badge: null },
+    { key: 'screener'    as const, label: 'Screener',    icon: Shield,            badge: null },
+    { key: 'automation'  as const, label: 'Automation',  icon: SlidersHorizontal, badge: null },
+    { key: 'bundle'      as const, label: 'Bundle',      icon: Package,           badge: null },
   ];
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* ── Page header ─────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+      <div className="flex items-center justify-between pb-5 shrink-0">
         <div>
-          <h1 className="text-xl font-semibold">Inbox Cleaner</h1>
-          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+          <h2 className="text-lg font-semibold">Tune</h2>
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm text-muted-foreground">Last {summary.period_days} days</span>
             {summary.total_senders > 0 && (
               <>
@@ -1092,26 +1210,33 @@ export function SenderIntelligenceClient({
               </span>
             )}
             {(refreshStatus === 'completed' || refreshStatus === 'completed_with_errors') && lastRefreshed && (
-              <span
+              <button
                 suppressHydrationWarning
-                className={cn('text-xs mr-1', refreshStatus === 'completed_with_errors' ? 'text-amber-600' : 'text-muted-foreground')}
-                title={refreshStatus === 'completed_with_errors' ? 'Some data could not be saved — try refreshing again' : undefined}
+                onClick={() => handleRefresh()}
+                disabled={isRefreshing}
+                className={cn(
+                  'text-xs mr-1 hover:underline underline-offset-2 transition-colors disabled:opacity-50',
+                  refreshStatus === 'completed_with_errors' ? 'text-amber-600' : 'text-muted-foreground hover:text-foreground',
+                )}
+                title="Click to re-analyze"
               >
-                {refreshStatus === 'completed_with_errors' ? '⚠ Partial update' : `Updated ${formatRelative(lastRefreshed)}`}
-              </span>
+                {refreshStatus === 'completed_with_errors' ? '⚠ Partial update · re-analyze?' : `Updated ${formatRelative(lastRefreshed)}`}
+              </button>
             )}
-            <Button variant="ghost" size="sm" onClick={handleOpenHistory} title="View action history" className="px-2">
-              <History className="w-4 h-4" />
+            <Button variant="ghost" size="sm" onClick={handleOpenHistory} aria-label="View action history" className="gap-1.5 px-2 text-xs text-muted-foreground">
+              <History className="w-3.5 h-3.5" />
+              History
             </Button>
             {initialSenders.length > 0 && (
               <Button
                 variant={groupByDomainOn ? 'secondary' : 'ghost'}
                 size="sm"
                 onClick={() => setGroupByDomainOn((v) => !v)}
-                title={groupByDomainOn ? 'Ungroup senders' : 'Group by domain'}
-                className="px-2"
+                aria-label={groupByDomainOn ? 'Ungroup senders' : 'Group by domain'}
+                className="gap-1.5 px-2 text-xs text-muted-foreground"
               >
-                <Layers className="w-4 h-4" />
+                <Layers className="w-3.5 h-3.5" />
+                {groupByDomainOn ? 'Grouped' : 'Group'}
               </Button>
             )}
             {initialSenders.length > 0 && (
@@ -1119,67 +1244,22 @@ export function SenderIntelligenceClient({
                 variant="ghost"
                 size="sm"
                 onClick={() => exportSendersAsCSV(filteredSenders)}
-                title="Export current view as CSV"
-                className="px-2"
+                aria-label="Export current view as CSV"
+                className="gap-1.5 px-2 text-xs text-muted-foreground"
               >
-                <Download className="w-4 h-4" />
-              </Button>
-            )}
-            {/* AI descriptions — load on demand */}
-            {initialSenders.length > 0 && !descriptionsLoaded && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleLoadDescriptions}
-                title="Load AI-generated sender descriptions"
-                className="px-2 text-xs gap-1 text-muted-foreground"
-              >
-                <span className="text-base leading-none">🤖</span>
-                Describe
+                <Download className="w-3.5 h-3.5" />
+                Export
               </Button>
             )}
 
-            {activeCategory === 'dormant' && filteredSenders.length > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => openConfirm('unsubscribe', filteredSenders.filter((s) => s.has_unsubscribe_header))}
-                disabled={isPending}
-                className="border-red-200 text-red-700 hover:bg-red-50 hover:border-red-300"
-              >
-                <Sparkles className="w-3.5 h-3.5 mr-1.5" />
-                Unsubscribe All ({filteredSenders.length})
-              </Button>
-            )}
-            {activeCategory !== 'dormant' && summary.never_engage_count > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={openCleanNeverEngage}
-                disabled={isPending}
-                className="border-red-200 text-red-700 hover:bg-red-50 hover:border-red-300"
-              >
-                <Sparkles className="w-3.5 h-3.5 mr-1.5" />
-                Clean Never Engage
-              </Button>
-            )}
-            {isFree && refreshStatus === 'completed' ? (
-              <Button variant="outline" size="sm" onClick={() => router.push('/billing')}>
-                <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-                Analyze inbox
-                <Badge variant="secondary" className="ml-1.5 text-[10px] px-1 py-0">Pro</Badge>
-              </Button>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRefresh}
-                disabled={isRefreshing || refreshStatus === 'running'}
-              >
-                <RefreshCw className={cn('w-3.5 h-3.5 mr-1.5', (isRefreshing || refreshStatus === 'running') && 'animate-spin')} />
-                Analyze inbox
-              </Button>
-            )}
+            <RecommendationsButton
+              senders={initialSenders}
+              typeStatsBySender={typeStatsBySender}
+              onAction={(action, senders) => openConfirm(action, senders)}
+              onCleanNeverEngage={openCleanNeverEngage}
+              isFree={isFree}
+              userDomain={userDomain}
+            />
           </div>
         )}
       </div>
@@ -1247,20 +1327,36 @@ export function SenderIntelligenceClient({
           </button>
         ))}
       </div>
-      {/* ── Senders category filter — sits inside the tab bar container ── */}
+      </div>{/* end tab bar */}
+
+      {/* ── Senders tab header ───────────────────────────────────────────────── */}
+      {activeTab === 'senders' && (
+        <div className="flex items-start gap-3 px-6 py-4 border-b border-border shrink-0">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-primary/10">
+            <Inbox className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold">Senders</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Senders from the past {summary.period_days} days, ranked by how often you open their email.
+              Target <strong className="font-medium text-red-600">Never Open</strong> and{' '}
+              <strong className="font-medium text-amber-600">Rarely Open</strong> senders to unsubscribe
+              or auto-archive and reduce inbox noise.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Senders category filter ──────────────────────────────────────────── */}
       {activeTab === 'senders' && (() => {
         const PRIMARY_CATS_NAV = [
-          { key: 'all',           label: 'All'            },
-          { key: 'never_engage',  label: 'Never Open',    colorCount: 'text-red-600'    },
-          { key: 'rarely_engage', label: 'Rarely Open',   colorCount: 'text-amber-600'  },
-          { key: 'dormant',       label: '⏸ Dormant',     colorCount: 'text-amber-600'  },
-          { key: 'regular',       label: 'Regular',       colorCount: 'text-blue-600'   },
-          { key: 'known_contact', label: 'Known Contact', colorCount: 'text-green-600'  },
-          { key: 'transactional', label: 'Transactional', colorCount: 'text-purple-600' },
-          { key: 'opt_outs',      label: 'Opt-outs'       },
+          { key: 'all',           label: 'All'           },
+          { key: 'never_engage',  label: 'Never Open',   colorCount: 'text-red-600'   },
+          { key: 'rarely_engage', label: 'Rarely Open',  colorCount: 'text-amber-600' },
+          { key: 'opt_outs',      label: 'Opt-outs'      },
         ];
         return (
-          <div className="flex items-center gap-2 px-6 py-2 overflow-x-auto">
+          <div className="flex items-center gap-2 px-6 py-2 border-b border-border shrink-0 overflow-x-auto">
             <div className="flex items-center gap-1 p-1 rounded-lg bg-muted flex-shrink-0">
               {PRIMARY_CATS_NAV.map(({ key, label, colorCount }) => {
                 const count  = categoryCount(key);
@@ -1322,55 +1418,79 @@ export function SenderIntelligenceClient({
               )}
             </div>
 
-            {/* Sort */}
-            {activeCategory !== 'dormant' && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-muted-foreground flex-shrink-0">
-                    <ArrowUpDown className="w-3.5 h-3.5 mr-1.5" />
-                    {sortKey === 'volume' ? 'Volume' : sortKey === 'open_rate' ? 'Open rate' : sortKey === 'last_email' ? 'Last email' : 'Name'}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-40">
-                  {([
-                    { key: 'volume',     label: 'Volume'      },
-                    { key: 'open_rate',  label: 'Open rate ↑' },
-                    { key: 'last_email', label: 'Last email'  },
-                    { key: 'name',       label: 'Name A–Z'    },
-                  ] as const).map(({ key, label }) => (
-                    <DropdownMenuItem
-                      key={key}
-                      onClick={() => setSortKey(key)}
-                      className={cn(sortKey === key && 'bg-primary/5 text-primary font-medium')}
-                    >
-                      {label}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
           </div>
         );
       })()}
-      </div>{/* end tab bar + filter wrapper */}
 
       {/* ── Tab panels ──────────────────────────────────────────────────────── */}
 
-      {/* Storage */}
-      {activeTab === 'storage' && (
-        <StorageTab />
+      {/* Noise Score */}
+      {activeTab === 'noise_score' && (
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <div className="flex items-start gap-3 px-6 py-4 border-b border-border shrink-0">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-primary/10">
+              <Activity className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold">Noise Score</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                A holistic view of how well your inbox noise is managed — scored across engagement, hygiene, and subscription debt.
+              </p>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto px-6 py-6">
+            <InboxHealthClient health={health ?? null} initialAlerts={initialAlerts} hideHeader />
+          </div>
+        </div>
       )}
 
       {/* Deep Clean */}
       {activeTab === 'deep_clean' && (
-        <div className="flex-1 overflow-auto">
-          <AutoCleanCard initialPrefs={autoCleanPrefs} />
-          <div className="mx-6 border-t border-border" />
-          <DeepCleanPanel
-            onJobCreated={(job: CleanupJob) => {
-              setActiveJobId(job.id);
-            }}
-          />
+        <div className="flex flex-col flex-1 overflow-hidden">
+          {/* Header */}
+          <div className="flex items-start gap-3 px-6 py-4 border-b border-border shrink-0">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-primary/10">
+              <Zap className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold">Deep Clean</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Bulk delete emails from low-engagement senders and reclaim storage.
+              </p>
+            </div>
+          </div>
+          {/* Sub-tab bar */}
+          <div className="flex items-center gap-3 px-6 py-3 border-b border-border shrink-0">
+            <div className="flex rounded-md overflow-hidden border border-border text-xs">
+              {([['bulk', 'Bulk Cleanup'], ['storage', 'Storage Analysis']] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setDeepCleanSubTab(key)}
+                  className={cn(
+                    'px-3 py-1 transition-colors',
+                    deepCleanSubTab === key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {deepCleanSubTab === 'bulk' && (
+            <div className="flex-1 overflow-auto">
+              <DeepCleanPanel
+                onJobCreated={(job: CleanupJob) => {
+                  setActiveJobId(job.id);
+                }}
+              />
+            </div>
+          )}
+          {deepCleanSubTab === 'storage' && (
+            <div className="flex flex-col flex-1 overflow-hidden">
+              <StorageTab />
+            </div>
+          )}
         </div>
       )}
 
@@ -1395,11 +1515,12 @@ export function SenderIntelligenceClient({
         </div>
       )}
 
+      {/* Filters */}
 
       {/* Opt-outs — rendered inside Senders tab when activeCategory === 'opt_outs' */}
       {activeTab === 'senders' && activeCategory === 'opt_outs' && (
         <div className="flex-1 overflow-auto px-6 py-6">
-          <div className="max-w-4xl mx-auto space-y-6">
+          <div className="space-y-6">
 
             {/* ── Aggregate metrics ─────────────────────────────────────────── */}
             {(recentUnsubscribes.length > 0 || optOutSenders.length > 0 || failedUnsubscribes.length > 0) && (() => {
@@ -1512,9 +1633,9 @@ export function SenderIntelligenceClient({
                         </span>
                       )}
                       {pending.length > 0 && (
-                        <span className="flex items-center gap-1 text-amber-600">
+                        <span className="flex items-center gap-1 text-amber-600" title="Most senders process unsubscribe requests within 14 days. If you keep receiving emails after that, use Block instead.">
                           <Loader2 className="w-3 h-3" />
-                          <strong>{pending.length}</strong> pending (within grace period)
+                          <strong>{pending.length}</strong> pending — allow up to 14 days
                         </span>
                       )}
                     </div>
@@ -1559,8 +1680,11 @@ export function SenderIntelligenceClient({
                                   </span>
                                 )}
                                 {s.outcome === 'pending' && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700 border border-amber-200">
-                                    <Loader2 className="w-3 h-3" /> {daysLeft}d left in grace period
+                                  <span
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700 border border-amber-200"
+                                    title="Most senders process unsubscribe requests within 14 days. If you keep receiving emails after that, use Block instead."
+                                  >
+                                    <Loader2 className="w-3 h-3" /> Pending — {daysLeft}d left (14-day grace)
                                   </span>
                                 )}
                               </td>
@@ -1580,6 +1704,7 @@ export function SenderIntelligenceClient({
                                     auto_archive_enabled: false, auto_archive_filter_id: null,
                                     ignored: false, period_days: 90, updated_at: null,
                                     emails_forwarded: 0, engagement_score: null, opt_out_replied_at: null,
+                                    ai_description: null,
                                   };
                                   return (
                                     <div className="flex items-center justify-end gap-1.5">
@@ -1723,37 +1848,15 @@ export function SenderIntelligenceClient({
             </div>
           )}
 
-          {/* Recommendations feed */}
-          <RecommendationsFeed
-            senders={initialSenders}
-            typeStatsBySender={typeStatsBySender}
-            onAction={(action, senders) => openConfirm(action, senders)}
-            isFree={isFree}
-            userDomain={userDomain}
-          />
-
-          {/* First-use "Start here" card — shown once before first cleanup */}
-          {noiseBaseline === null && summary.never_engage_count >= 5 && (
-            <div className="mx-6 mt-3 rounded-lg border border-amber-200 bg-amber-50/60 px-4 py-3 shrink-0 flex items-start gap-3">
-              <span className="text-lg leading-none shrink-0 mt-0.5">👋</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-amber-900">Start here</p>
-                <p className="text-xs text-amber-800 mt-0.5">
-                  You have <strong>{summary.never_engage_count}</strong> senders you never open,
-                  generating <strong>{summary.total_noise_emails.toLocaleString()}</strong> noise emails.
-                  {' '}Delete them in one pass to reclaim your inbox.
-                </p>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setActiveTab('deep_clean')}
-                className="shrink-0 h-7 text-xs border-amber-300 text-amber-900 hover:bg-amber-100"
-              >
-                <Zap className="w-3 h-3 mr-1" />
-                Deep Clean
-              </Button>
-            </div>
+          {/* AI-generated weekly noise briefing — only shown when available */}
+          {briefing && (
+            <NoiseBriefingCard
+              briefing={briefing}
+              totalTrashed={initialSenders
+                .filter((s) => NOISE_CATEGORIES.has(s.category))
+                .reduce((n, s) => n + (s.emails_deleted ?? 0), 0)}
+              onAction={() => setActiveCategory('never_engage')}
+            />
           )}
 
           {/* New sender digest (screener) */}
@@ -1767,21 +1870,15 @@ export function SenderIntelligenceClient({
           )}
 
 
-          {/* Secondary filter chips — category cross-cuts + type filters */}
+          {/* Secondary filter chips — category cross-cuts */}
           {activeCategory !== 'opt_outs' && (() => {
             const SECONDARY_CATS = [
               { key: 'lapsed',           label: '📉 Lapsed'          },
               { key: 'still_receiving',  label: 'Still Receiving'     },
               { key: 'high_delete_rate', label: '🗑 High delete rate' },
             ];
-            const typeChips = TYPE_FILTERS.map(({ key, label }) => ({
-              key, label,
-              count: Object.values(typeStatsBySender).filter((stats) =>
-                stats.some((t) => t.email_type === key)
-              ).length,
-            })).filter((t) => t.count > 0);
-            const hasCats  = SECONDARY_CATS.some(({ key }) => categoryCount(key) > 0);
-            if (!hasCats && typeChips.length === 0) return null;
+            const hasCats = SECONDARY_CATS.some(({ key }) => categoryCount(key) > 0);
+            if (!hasCats) return null;
             return (
               <div className="px-6 pb-2 shrink-0 flex gap-1 flex-wrap">
                 {SECONDARY_CATS.map(({ key, label }) => {
@@ -1806,30 +1903,6 @@ export function SenderIntelligenceClient({
                     </button>
                   );
                 })}
-                {/* Type filter pills — only shown when type intelligence data exists */}
-                {typeChips.length > 0 && SECONDARY_CATS.some(({ key }) => categoryCount(key) > 0) && (
-                  <span className="text-muted-foreground/30 self-center px-0.5">·</span>
-                )}
-                {typeChips.map(({ key, label, count }) => {
-                  const active = activeTypeFilter === key;
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => setActiveTypeFilter(active ? null : key)}
-                      className={cn(
-                        'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border',
-                        active
-                          ? 'bg-secondary text-secondary-foreground border-secondary'
-                          : 'text-muted-foreground border-border hover:border-foreground/30 hover:text-foreground',
-                      )}
-                    >
-                      {label}
-                      <span className={cn('text-[10px] px-1 py-0.5 rounded-full', active ? 'bg-background/40' : 'bg-muted')}>
-                        {count}
-                      </span>
-                    </button>
-                  );
-                })}
               </div>
             );
           })()}
@@ -1849,16 +1922,40 @@ export function SenderIntelligenceClient({
                       title="Select all"
                     />
                   </th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Sender</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Category</th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden lg:table-cell">
-                    {activeCategory === 'dormant' ? 'Emails/mo' : 'Emails'}
-                  </th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden lg:table-cell">Trashed</th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden lg:table-cell">Replies</th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden lg:table-cell">Open rate</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden xl:table-cell">Last Email</th>
-                  <th className="px-4 py-3 w-24" />
+                  {(() => {
+                    function SortTh({ col, label, align = 'right', className }: { col: typeof sortKey; label: string; align?: 'left' | 'right'; className?: string }) {
+                      const active = sortKey === col;
+                      function handleClick() {
+                        if (active) setSortDir((d) => d === 'desc' ? 'asc' : 'desc');
+                        else { setSortKey(col); setSortDir('desc'); }
+                      }
+                      return (
+                        <th
+                          className={cn('px-4 py-3 font-medium text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors', align === 'right' ? 'text-right' : 'text-left', className)}
+                          onClick={handleClick}
+                        >
+                          <span className="inline-flex items-center gap-1" style={{ justifyContent: align === 'right' ? 'flex-end' : 'flex-start' }}>
+                            {label}
+                            {active
+                              ? (sortDir === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)
+                              : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                          </span>
+                        </th>
+                      );
+                    }
+                    return (
+                      <>
+                        <SortTh col="name"       label="Sender"    align="left" />
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Category</th>
+                        <SortTh col="volume"     label="Emails"                 className="hidden lg:table-cell" />
+                        <SortTh col="trashed"    label="Trashed"                className="hidden lg:table-cell" />
+                        <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden lg:table-cell">Replies</th>
+                        <SortTh col="open_rate"  label="Open rate"              className="hidden lg:table-cell" />
+                        <SortTh col="last_email" label="Last Email" align="left" className="hidden xl:table-cell" />
+                      </>
+                    );
+                  })()}
+                  <th className="px-4 py-3 w-32" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -1869,7 +1966,7 @@ export function SenderIntelligenceClient({
                     </td>
                   </tr>
                 ) : groupByDomainOn ? (
-                  groupByDomain(filteredSenders).map((group) => {
+                  groupByDomain(filteredSenders, sortKey, sortDir).map((group) => {
                     // Single-sender domain — no grouping chrome needed, render flat
                     if (group.senders.length === 1) {
                       const s = group.senders[0];
@@ -1880,13 +1977,12 @@ export function SenderIntelligenceClient({
                           isSelected={selected.has(s.sender_email)}
                           onToggle={() => toggleRow(s.sender_email)}
                           onAction={(action) => openConfirm(action, [s])}
-                          onPreview={() => handleOpenPreview(s)}
+                          typeStats={typeStatsBySender[s.sender_email]}
                           isPending={isPending}
                           aiDescription={aiDescriptions[s.sender_email]}
                           triageActivity={triageBySender[s.sender_email]}
                           openCommitments={protectedContacts.get(s.sender_email)}
                           userDomain={userDomain}
-                          isDormantMode={activeCategory === 'dormant'}
                         />
                       );
                     }
@@ -1904,7 +2000,7 @@ export function SenderIntelligenceClient({
                         selected={selected}
                         onToggleRow={toggleRow}
                         onAction={(action, senders) => openConfirm(action, senders)}
-                        onPreview={(sender) => handleOpenPreview(sender)}
+                        typeStatsBySender={typeStatsBySender}
                         isPending={isPending}
                         protectedContacts={protectedContacts}
                         userDomain={userDomain}
@@ -1919,13 +2015,12 @@ export function SenderIntelligenceClient({
                       isSelected={selected.has(sender.sender_email)}
                       onToggle={() => toggleRow(sender.sender_email)}
                       onAction={(action) => openConfirm(action, [sender])}
-                      onPreview={() => handleOpenPreview(sender)}
+                      typeStats={typeStatsBySender[sender.sender_email]}
                       isPending={isPending}
                       aiDescription={aiDescriptions[sender.sender_email]}
                       triageActivity={triageBySender[sender.sender_email]}
                       openCommitments={protectedContacts.get(sender.sender_email)}
                       userDomain={userDomain}
-                      isDormantMode={activeCategory === 'dormant'}
                     />
                   ))
                 )}
@@ -1955,21 +2050,6 @@ export function SenderIntelligenceClient({
               loading={historyLoading}
               onUndo={handleUndo}
               onClose={() => setShowHistory(false)}
-            />
-          )}
-
-          {/* Preview modal */}
-          {previewSender && (
-            <PreviewModal
-              sender={previewSender}
-              preview={previewData}
-              typeStats={typeStatsBySender[previewSender.sender_email]}
-              loading={previewLoading}
-              onAction={(action) => {
-                setPreviewSender(null);
-                openConfirm(action, [previewSender]);
-              }}
-              onClose={() => { setPreviewSender(null); setPreviewData(null); }}
             />
           )}
 
@@ -2056,20 +2136,22 @@ export function SenderIntelligenceClient({
 // ── DomainGroupRow ────────────────────────────────────────────────────────────
 
 function DomainGroupRow({
-  group, isExpanded, onToggleExpand, selected, onToggleRow, onAction, onPreview, isPending,
+  group, isExpanded, onToggleExpand, selected, onToggleRow, onAction, typeStatsBySender, isPending,
   protectedContacts, userDomain,
 }: {
-  group:              DomainGroup;
-  isExpanded:         boolean;
-  onToggleExpand:     () => void;
-  selected:           Set<string>;
-  onToggleRow:        (email: string) => void;
-  onAction:           (action: string, senders: SenderRow[]) => void;
-  onPreview:          (sender: SenderRow) => void;
-  isPending:          boolean;
-  protectedContacts?: Map<string, number>;
-  userDomain?:        string | null;
+  group:               DomainGroup;
+  isExpanded:          boolean;
+  onToggleExpand:      () => void;
+  selected:            Set<string>;
+  onToggleRow:         (email: string) => void;
+  onAction:            (action: string, senders: SenderRow[]) => void;
+  typeStatsBySender?:  Record<string, EmailTypeStat[]>;
+  isPending:           boolean;
+  protectedContacts?:  Map<string, number>;
+  userDomain?:         string | null;
 }) {
+  const { data: session } = useSession();
+  const gmailAcct = session?.user?.email ? encodeURIComponent(session.user.email) : '0';
   const allSelected    = group.senders.every((s) => selected.has(s.sender_email));
   const nonTransact    = group.senders.filter((s) => s.category !== 'transactional');
   const categoryMeta   = CATEGORY_META[group.category] ?? { label: group.category, bg: 'bg-gray-100 text-gray-600 border-gray-200' };
@@ -2093,7 +2175,6 @@ function DomainGroupRow({
         </td>
         <td className="px-4 py-3 max-w-xs" onClick={onToggleExpand} style={{ cursor: 'pointer' }}>
           <div className="flex items-center gap-2">
-            <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground transition-transform shrink-0', isExpanded && 'rotate-180')} />
             <div>
               <span className="font-semibold">{group.domain}</span>
               <span className="text-xs text-muted-foreground ml-2">
@@ -2105,6 +2186,7 @@ function DomainGroupRow({
                 </span>
               )}
             </div>
+            <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground transition-transform shrink-0', isExpanded && 'rotate-180')} />
           </div>
         </td>
         <td className="px-4 py-3 hidden md:table-cell">
@@ -2141,13 +2223,12 @@ function DomainGroupRow({
           </span>
         </td>
         <td className="hidden xl:table-cell" />
-        <td className="hidden xl:table-cell" />
         {/* Bulk action for the whole domain (non-transactional only) */}
-        <td className="px-4 py-3 w-20">
+        <td className="px-4 py-3 w-32">
           {nonTransact.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={isPending}>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={isPending} aria-label={`Actions for ${group.domain}`}>
                   <ChevronDown className="w-3.5 h-3.5" />
                 </Button>
               </DropdownMenuTrigger>
@@ -2237,24 +2318,73 @@ function DomainGroupRow({
             )}
           </td>
           <td className="px-4 py-2.5 text-right hidden lg:table-cell">
-            <span className={cn('text-sm font-medium tabular-nums', engagementColor(sender.engagement_rate ?? 0))}>
+            <div className={cn('text-sm font-medium tabular-nums', engagementColor(sender.engagement_rate ?? 0))}>
               {Math.round((sender.engagement_rate ?? 0) * 100)}%
-            </span>
+            </div>
+            <div className="text-xs text-muted-foreground tabular-nums">
+              {sender.emails_opened.toLocaleString()} of {sender.emails_received.toLocaleString()}
+            </div>
           </td>
           <td className="px-4 py-2.5 text-muted-foreground text-sm hidden xl:table-cell">
             {formatDate(sender.last_email_date)}
           </td>
-          <td className="hidden xl:table-cell" />
-          <td className="px-4 py-2.5 w-20">
+          <td className="px-4 py-2.5 w-32">
             <div className="flex items-center gap-1">
-              <Button
-                variant="ghost" size="sm"
-                className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-                onClick={() => onPreview(sender)}
-                title="Preview latest email"
+              <SenderTypeHoverCard sender={sender} typeStats={typeStatsBySender?.[sender.sender_email]} size="sm" />
+              <a
+                href={`https://mail.google.com/mail/u/${gmailAcct}/#search/from:${encodeURIComponent(sender.sender_email)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                title="View in Gmail"
+                aria-label="View in Gmail"
               >
-                <Eye className="w-3 h-3" />
-              </Button>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0" disabled={isPending} title="More actions" aria-label="More actions">
+                    <MoreHorizontal className="w-3 h-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  {sender.has_unsubscribe_header && sender.unsubscribe_status !== 'unsubscribed' && (
+                    <DropdownMenuItem onClick={() => onAction('unsubscribe', [sender])}>
+                      <MailX className="w-3.5 h-3.5 mr-2" />
+                      Unsubscribe
+                    </DropdownMenuItem>
+                  )}
+                  {sender.unsubscribe_status === 'unsubscribed' && (
+                    <DropdownMenuItem onClick={() => onAction('resubscribe', [sender])}>
+                      <Undo2 className="w-3.5 h-3.5 mr-2" />
+                      Resubscribe
+                    </DropdownMenuItem>
+                  )}
+                  {!sender.auto_archive_enabled ? (
+                    <DropdownMenuItem onClick={() => onAction('auto_archive', [sender])}>
+                      <Archive className="w-3.5 h-3.5 mr-2" />
+                      Auto-archive
+                    </DropdownMenuItem>
+                  ) : (
+                    <DropdownMenuItem onClick={() => onAction('remove_auto_archive', [sender])}>
+                      <Filter className="w-3.5 h-3.5 mr-2" />
+                      Remove Auto-archive
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onClick={() => onAction('ignore', [sender])}>
+                    <BellOff className="w-3.5 h-3.5 mr-2" />
+                    Hide from Report
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="text-red-600 focus:text-red-600"
+                    onClick={() => onAction('bulk_delete', [sender])}
+                  >
+                    <Trash2 className="w-3.5 h-3.5 mr-2" />
+                    Delete All Emails
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </td>
         </tr>
@@ -2353,168 +2483,7 @@ function HistoryModal({
   );
 }
 
-// ── PreviewModal ──────────────────────────────────────────────────────────────
-
-function PreviewModal({
-  sender, preview, typeStats, loading, onAction, onClose,
-}: {
-  sender:    SenderRow;
-  preview:   SenderPreview | null;
-  typeStats?: EmailTypeStat[];
-  loading:   boolean;
-  onAction:  (action: string) => void;
-  onClose:   () => void;
-}) {
-  const [emailIndex, setEmailIndex] = useState(0);
-  const categoryMeta = CATEGORY_META[sender.category] ?? { label: sender.category, bg: 'bg-gray-100 text-gray-600 border-gray-200' };
-
-  const emails = preview?.emails ?? (preview ? [preview] : []);
-  const current = emails[emailIndex] ?? null;
-  const total   = emails.length;
-
-  // Reset index when a new preview loads
-  useEffect(() => { setEmailIndex(0); }, [preview]);
-
-  return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 min-w-0">
-            <Eye className="w-4 h-4 shrink-0" />
-            <span className="truncate">{sender.sender_name || sender.sender_email}</span>
-          </DialogTitle>
-          <DialogDescription className="flex items-center gap-2 flex-wrap">
-            <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border', categoryMeta.bg)}>
-              {categoryMeta.label}
-            </span>
-            <span>
-              {sender.emails_received.toLocaleString()} emails
-              {' · '}{Math.round((sender.engagement_rate ?? 0) * 100)}% open rate
-              {(sender.emails_deleted ?? 0) > 0 && (
-                <span className="text-amber-600 dark:text-amber-500">
-                  {' · '}{sender.emails_deleted.toLocaleString()} trashed
-                  {' '}({Math.round(((sender.emails_deleted ?? 0) / (sender.emails_received || 1)) * 100)}%)
-                </span>
-              )}
-            </span>
-          </DialogDescription>
-        </DialogHeader>
-
-        {/* Email preview with navigation */}
-        <div className="rounded-lg border border-border bg-muted/30">
-          {/* Nav bar */}
-          {!loading && total > 1 && (
-            <div className="flex items-center justify-between px-4 py-2 border-b border-border">
-              <span className="text-xs text-muted-foreground">
-                {emailIndex + 1} of {total} recent emails
-              </span>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0"
-                  onClick={() => setEmailIndex((i) => Math.max(0, i - 1))}
-                  disabled={emailIndex === 0}
-                  title="Newer"
-                >
-                  <ChevronDown className="w-3.5 h-3.5 rotate-180" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0"
-                  onClick={() => setEmailIndex((i) => Math.min(total - 1, i + 1))}
-                  disabled={emailIndex === total - 1}
-                  title="Older"
-                >
-                  <ChevronDown className="w-3.5 h-3.5" />
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Email content */}
-          <div className="p-4 min-h-[100px]">
-            {loading ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Loading emails…
-              </div>
-            ) : current ? (
-              <div className="space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm font-medium leading-tight">{current.subject || '(no subject)'}</p>
-                  {current.date_ts && (
-                    <span className="text-xs text-muted-foreground shrink-0">
-                      {new Date(current.date_ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </span>
-                  )}
-                </div>
-                {current.snippet && (
-                  <p className="text-sm text-muted-foreground leading-relaxed line-clamp-4">
-                    {current.snippet}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">No recent emails found from this sender.</p>
-            )}
-          </div>
-        </div>
-
-        {/* Email type breakdown */}
-        {typeStats && typeStats.length > 0 && (
-          <div className="rounded-lg border border-border p-4">
-            <SenderTypeBreakdown
-              stats={typeStats}
-              onAction={onAction}
-              hasUnsubscribeHeader={sender.has_unsubscribe_header}
-              unsubscribeStatus={sender.unsubscribe_status}
-              autoArchiveEnabled={sender.auto_archive_enabled}
-            />
-          </div>
-        )}
-
-        {/* Quick actions */}
-        <div className="flex flex-wrap gap-2">
-          {sender.has_unsubscribe_header && sender.unsubscribe_status !== 'unsubscribed' && (
-            <Button size="sm" variant="outline" onClick={() => onAction('unsubscribe')}>
-              <MailX className="w-3.5 h-3.5 mr-1.5" />
-              Unsubscribe
-            </Button>
-          )}
-          {!sender.auto_archive_enabled && (
-            <Button size="sm" variant="outline" onClick={() => onAction('auto_archive')}>
-              <Archive className="w-3.5 h-3.5 mr-1.5" />
-              Auto-archive
-            </Button>
-          )}
-          <Button size="sm" variant="outline" onClick={() => onAction('bulk_delete')} className="text-red-600 border-red-200 hover:bg-red-50">
-            <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-            Delete emails
-          </Button>
-          {isStillReceiving(sender) && (
-            <Button size="sm" variant="destructive" onClick={() => onAction('report_spam')}>
-              <AlertTriangle className="w-3.5 h-3.5 mr-1.5" />
-              Report as spam
-            </Button>
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            <X className="w-3.5 h-3.5 mr-1.5" />
-            Close
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── SenderTypeBreakdown ───────────────────────────────────────────────────────
-// Expandable type breakdown shown below a sender row.
-// Actions (unsubscribe / auto-archive) operate on the full sender, not per-type.
+// ── SenderTypeHoverCard ───────────────────────────────────────────────────────
 
 const TYPE_META: Record<string, { icon: string; label: string }> = {
   receipt:    { icon: '📦', label: 'Receipts'    },
@@ -2526,100 +2495,68 @@ const TYPE_META: Record<string, { icon: string; label: string }> = {
   personal:   { icon: '👤', label: 'Personal'    },
 };
 
-function SenderTypeBreakdown({
-  stats,
-  onAction,
-  hasUnsubscribeHeader,
-  unsubscribeStatus,
-  autoArchiveEnabled,
-}: {
-  stats:                EmailTypeStat[];
-  onAction:             (action: string) => void;
-  hasUnsubscribeHeader: boolean;
-  unsubscribeStatus:    string | null;
-  autoArchiveEnabled:   boolean;
+function SenderTypeHoverCard({ sender, typeStats, size = 'md' }: {
+  sender:     SenderRow;
+  typeStats?: EmailTypeStat[];
+  size?:      'sm' | 'md';
 }) {
-  const sorted   = [...stats].sort((a, b) => b.email_count - a.email_count);
-  const maxCount = sorted[0]?.email_count || 1;
+  const dim = size === 'sm' ? 'h-6 w-6' : 'h-7 w-7';
+  const icon = size === 'sm' ? 'w-3 h-3' : 'w-3.5 h-3.5';
+  const deleted  = sender.emails_deleted ?? 0;
+  const received = sender.emails_received || 1;
+  const openPct  = Math.round((sender.engagement_rate ?? 0) * 100);
+  const trashPct = Math.round((deleted / received) * 100);
+  const sorted   = typeStats ? [...typeStats].sort((a, b) => b.email_count - a.email_count) : [];
 
   return (
-    <div className="space-y-1.5">
-      <p className="text-xs font-medium text-muted-foreground mb-2">Email type breakdown</p>
-      {sorted.map((stat) => {
-        const meta     = TYPE_META[stat.email_type] ?? { icon: '📧', label: stat.email_type };
-        const openRate = stat.email_count > 0 ? Math.round((stat.open_count / stat.email_count) * 100) : 0;
-        const barWidth = Math.round((stat.email_count / maxCount) * 100);
-        const isNoisy  = openRate < 10;
-        const isKept   = openRate >= 50;
-
-        return (
-          <div key={stat.email_type} className="flex items-center gap-3 text-xs group">
-            {/* Icon + label */}
-            <div className="w-28 shrink-0 flex items-center gap-1.5">
-              <span>{meta.icon}</span>
-              <span className="font-medium text-foreground">{meta.label}</span>
-            </div>
-
-            {/* Count */}
-            <span className="w-10 text-right tabular-nums text-muted-foreground shrink-0">
-              {stat.email_count.toLocaleString()}
-            </span>
-
-            {/* Open rate bar */}
-            <div className="flex-1 flex items-center gap-2 min-w-0">
-              <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden max-w-32">
-                <div
-                  className={cn(
-                    'h-full rounded-full transition-all',
-                    isKept  ? 'bg-green-500'  :
-                    isNoisy ? 'bg-red-400'    : 'bg-amber-400',
-                  )}
-                  style={{ width: `${barWidth}%` }}
-                />
-              </div>
-              <span className={cn(
-                'tabular-nums shrink-0',
-                isKept  ? 'text-green-600' :
-                isNoisy ? 'text-red-500'   : 'text-amber-600',
-              )}>
-                {openRate}% opened
-              </span>
-            </div>
-
-            {/* Action or Keep label */}
-            <div className="shrink-0 ml-auto">
-              {isKept ? (
-                <span className="text-green-600 font-medium">Keep</span>
-              ) : isNoisy ? (
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {hasUnsubscribeHeader && unsubscribeStatus !== 'unsubscribed' && (
-                    <button
-                      onClick={() => onAction('unsubscribe')}
-                      title="Unsubscribe from this sender (affects all mail from this sender)"
-                      className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"
-                    >
-                      Unsubscribe
-                    </button>
-                  )}
-                  {!autoArchiveEnabled && (
-                    <button
-                      onClick={() => onAction('auto_archive')}
-                      title="Auto-archive this sender (affects all mail from this sender)"
-                      className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"
-                    >
-                      Auto-archive
-                    </button>
-                  )}
-                </div>
-              ) : null}
-            </div>
+    <HoverCard openDelay={250} closeDelay={100}>
+      <HoverCardTrigger asChild>
+        <Button
+          variant="ghost" size="sm"
+          className={cn(dim, 'p-0 text-muted-foreground hover:text-foreground')}
+          aria-label="Sender details"
+        >
+          <Info className={icon} />
+        </Button>
+      </HoverCardTrigger>
+      <HoverCardContent className="w-60 p-3" side="left" align="center">
+        <div className="space-y-2.5">
+          {/* Stats row */}
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span><span className="font-medium text-foreground">{sender.emails_received.toLocaleString()}</span> emails</span>
+            <span><span className={cn('font-medium', openPct >= 30 ? 'text-green-600' : openPct >= 10 ? 'text-amber-600' : 'text-red-500')}>{openPct}%</span> open</span>
+            {deleted > 0 && (
+              <span><span className="font-medium text-amber-600">{trashPct}%</span> trashed</span>
+            )}
           </div>
-        );
-      })}
-      <p className="text-[10px] text-muted-foreground/70 mt-2">
-        Actions apply to all mail from this sender, not just one type.
-      </p>
-    </div>
+          {/* Type breakdown */}
+          {sorted.length > 0 && (
+            <div className="space-y-1.5 pt-1 border-t border-border">
+              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Email types</p>
+              {sorted.map((stat) => {
+                const meta    = TYPE_META[stat.email_type] ?? { icon: '📧', label: stat.email_type };
+                const openPct = stat.email_count > 0 ? Math.round((stat.open_count / stat.email_count) * 100) : 0;
+                const isNoisy = openPct < 10;
+                const isKept  = openPct >= 50;
+                return (
+                  <div key={stat.email_type} className="flex items-center gap-2 text-xs">
+                    <span className="w-4 shrink-0 text-center">{meta.icon}</span>
+                    <span className="flex-1 text-foreground">{meta.label}</span>
+                    <span className="tabular-nums text-muted-foreground shrink-0">{stat.email_count}</span>
+                    <span className={cn(
+                      'tabular-nums shrink-0 w-10 text-right',
+                      isKept ? 'text-green-600' : isNoisy ? 'text-red-500' : 'text-amber-600',
+                    )}>
+                      {openPct}%
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </HoverCardContent>
+    </HoverCard>
   );
 }
 
@@ -2652,6 +2589,7 @@ function optOutToSenderRow(s: OptOutSender): SenderRow {
     emails_forwarded:        0,
     engagement_score:        null,
     opt_out_replied_at:      s.opt_out_replied_at,
+    ai_description:          null,
   };
 }
 
@@ -2682,6 +2620,7 @@ function failedUnsubToSenderRow(s: FailedUnsub): SenderRow {
     emails_forwarded:        0,
     engagement_score:        null,
     opt_out_replied_at:      null,
+    ai_description:          null,
   };
 }
 
@@ -2873,26 +2812,26 @@ function SenderTableRow({
   isSelected,
   onToggle,
   onAction,
-  onPreview,
+  typeStats,
   isPending,
   aiDescription,
   triageActivity,
   openCommitments,
   userDomain,
-  isDormantMode,
 }: {
   sender:           SenderRow;
   isSelected:       boolean;
   onToggle:         () => void;
   onAction:         (action: string) => void;
-  onPreview:        () => void;
+  typeStats?:       EmailTypeStat[];
   isPending:        boolean;
   aiDescription?:   string;
   triageActivity?:  { reply_count: number; dismiss_count: number };
   openCommitments?: number;
   userDomain?:      string | null;
-  isDormantMode?:   boolean;
 }) {
+  const { data: session } = useSession();
+  const gmailAcct = session?.user?.email ? encodeURIComponent(session.user.email) : '0';
   const engRate    = Math.round((sender.engagement_rate ?? 0) * 100);
   const deleted    = sender.emails_deleted ?? 0;
   const received   = sender.emails_received || 1;
@@ -2985,12 +2924,9 @@ function SenderTableRow({
         )}
       </td>
 
-      {/* Emails / Emails per month in dormant mode */}
+      {/* Emails */}
       <td className="px-4 py-3 text-right tabular-nums hidden lg:table-cell">
-        {isDormantMode
-          ? Math.round((sender.emails_received / (sender.period_days || 90)) * 30).toLocaleString()
-          : sender.emails_received.toLocaleString()
-        }
+        {sender.emails_received.toLocaleString()}
       </td>
 
       {/* Trashed */}
@@ -3020,10 +2956,15 @@ function SenderTableRow({
       </td>
 
       {/* Engagement */}
-      <td className="px-4 py-3 text-right hidden lg:table-cell">
-        <span className={cn('font-medium tabular-nums', engagementColor(sender.engagement_rate ?? 0))}>
-          {engRate}%
-        </span>
+      <td className="px-4 py-3 text-right tabular-nums hidden lg:table-cell">
+        {sender.emails_opened === 0 ? (
+          <span className="text-muted-foreground">—</span>
+        ) : (
+          <span className={cn('tabular-nums', engagementColor(sender.engagement_rate ?? 0))}>
+            {sender.emails_opened.toLocaleString()}
+            <span className="text-xs ml-1">({engRate}%)</span>
+          </span>
+        )}
       </td>
 
       {/* Last Email */}
@@ -3032,118 +2973,78 @@ function SenderTableRow({
       </td>
 
 
-      {/* Actions + expand */}
-      <td className={cn('px-4 py-3', isDormantMode ? 'w-44' : 'w-24')}>
-        {/* Dormant mode: simplified Unsubscribe + Keep buttons */}
-        {isDormantMode ? (
-          <div className="flex items-center gap-1.5 justify-end">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-xs text-red-700 hover:text-red-800 hover:bg-red-50 border border-red-200"
-              onClick={() => onAction('unsubscribe')}
-              disabled={isPending}
-              title="Send unsubscribe request"
-            >
-              <MailX className="w-3 h-3 mr-1" />
-              Unsub
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-xs border border-border hover:bg-muted"
-              onClick={() => onAction('ignore')}
-              disabled={isPending}
-              title="Keep — remove from dormant suggestions"
-            >
-              Keep
-            </Button>
-          </div>
-        ) : (
+      {/* Actions */}
+      <td className="px-4 py-3 w-32">
         <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-            onClick={onPreview}
-            title="Preview latest email"
+          <SenderTypeHoverCard sender={sender} typeStats={typeStats} size="md" />
+          <a
+            href={`https://mail.google.com/mail/u/${gmailAcct}/#search/from:${encodeURIComponent(sender.sender_email)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            title="View in Gmail"
+            aria-label="View in Gmail"
           >
-            <Eye className="w-3.5 h-3.5" />
-          </Button>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
           <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={isPending} title="More actions">
-              <MoreHorizontal className="w-3.5 h-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            {/* Unsubscribe */}
-            {sender.has_unsubscribe_header && sender.unsubscribe_status !== 'unsubscribed' && (
-              <DropdownMenuItem onClick={() => onAction('unsubscribe')}>
-                <MailX className="w-3.5 h-3.5 mr-2" />
-                Unsubscribe
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={isPending} title="More actions" aria-label="More actions">
+                <MoreHorizontal className="w-3.5 h-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              {sender.has_unsubscribe_header && sender.unsubscribe_status !== 'unsubscribed' && (
+                <DropdownMenuItem onClick={() => onAction('unsubscribe')}>
+                  <MailX className="w-3.5 h-3.5 mr-2" />
+                  Unsubscribe
+                </DropdownMenuItem>
+              )}
+              {sender.unsubscribe_status === 'unsubscribed' && (
+                <DropdownMenuItem onClick={() => onAction('resubscribe')}>
+                  <Undo2 className="w-3.5 h-3.5 mr-2" />
+                  Resubscribe
+                </DropdownMenuItem>
+              )}
+              {!sender.auto_archive_enabled ? (
+                <DropdownMenuItem onClick={() => onAction('auto_archive')}>
+                  <Archive className="w-3.5 h-3.5 mr-2" />
+                  Auto-archive
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onClick={() => onAction('remove_auto_archive')}>
+                  <Filter className="w-3.5 h-3.5 mr-2" />
+                  Remove Auto-archive
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={() => onAction('add_to_bundle')}>
+                <Package className="w-3.5 h-3.5 mr-2" />
+                Add to Bundle
               </DropdownMenuItem>
-            )}
-
-            {/* Resubscribe */}
-            {sender.unsubscribe_status === 'unsubscribed' && (
-              <DropdownMenuItem onClick={() => onAction('resubscribe')}>
-                <Undo2 className="w-3.5 h-3.5 mr-2" />
-                Resubscribe
+              <DropdownMenuItem onClick={() => onAction('ignore')}>
+                <BellOff className="w-3.5 h-3.5 mr-2" />
+                Hide from Report
               </DropdownMenuItem>
-            )}
-
-            {/* Auto-archive / remove */}
-            {!sender.auto_archive_enabled && (
-              <DropdownMenuItem onClick={() => onAction('auto_archive')}>
-                <Archive className="w-3.5 h-3.5 mr-2" />
-                Auto-archive
-              </DropdownMenuItem>
-            )}
-            {sender.auto_archive_enabled && (
-              <DropdownMenuItem onClick={() => onAction('remove_auto_archive')}>
-                <Filter className="w-3.5 h-3.5 mr-2" />
-                Remove Auto-archive
-              </DropdownMenuItem>
-            )}
-
-            {/* Add to Bundle */}
-            <DropdownMenuItem onClick={() => onAction('add_to_bundle')}>
-              <Package className="w-3.5 h-3.5 mr-2" />
-              Add to Bundle
-            </DropdownMenuItem>
-
-            {/* Ignore */}
-            <DropdownMenuItem onClick={() => onAction('ignore')}>
-              <BellOff className="w-3.5 h-3.5 mr-2" />
-              Hide from Report
-            </DropdownMenuItem>
-
-            <DropdownMenuSeparator />
-
-            {/* Bulk delete */}
-            <DropdownMenuItem
-              className="text-red-600 focus:text-red-600"
-              onClick={() => onAction('bulk_delete')}
-            >
-              <Trash2 className="w-3.5 h-3.5 mr-2" />
-              Delete All Emails
-            </DropdownMenuItem>
-
-            {/* Report as Spam — only for Still Receiving senders */}
-            {isStillReceiving(sender) && (
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-red-600 focus:text-red-600"
-                onClick={() => onAction('report_spam')}
+                onClick={() => onAction('bulk_delete')}
               >
-                <AlertTriangle className="w-3.5 h-3.5 mr-2" />
-                Report as Spam
+                <Trash2 className="w-3.5 h-3.5 mr-2" />
+                Delete All Emails
               </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+              {isStillReceiving(sender) && (
+                <DropdownMenuItem
+                  className="text-red-600 focus:text-red-600"
+                  onClick={() => onAction('report_spam')}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 mr-2" />
+                  Report as Spam
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-        )}
       </td>
     </tr>
 

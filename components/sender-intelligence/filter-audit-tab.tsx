@@ -4,6 +4,7 @@
 // Categorises issues as: orphaned, dead, duplicate, untracked, stale_reference.
 
 import { useState, useCallback } from 'react';
+import { useSession } from 'next-auth/react';
 import { toast }    from 'sonner';
 import {
   Filter, RefreshCw, Loader2, Trash2, AlertTriangle, CheckCircle2,
@@ -71,6 +72,8 @@ const ISSUE_META: Record<FilterIssueType, {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function FilterAuditTab({ embedded = false }: { embedded?: boolean }) {
+  const { data: session } = useSession();
+  const gmailAcct = session?.user?.email ? encodeURIComponent(session.user.email) : '0';
   const [result,   setResult]   = useState<FilterAuditResult | null>(null);
   const [loading,  setLoading]  = useState(false);
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
@@ -243,7 +246,7 @@ export function FilterAuditTab({ embedded = false }: { embedded?: boolean }) {
                   Untracked filters are shown for awareness only — Inbox Triage won&apos;t delete
                   them automatically. Review them in{' '}
                   <a
-                    href="https://mail.google.com/mail/u/0/#settings/filters"
+                    href={`https://mail.google.com/mail/u/${gmailAcct}/#settings/filters`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="underline hover:text-foreground"

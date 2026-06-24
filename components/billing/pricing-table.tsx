@@ -336,9 +336,11 @@ function PlanCard({
 export function PricingTable({
   currentPlan,
   stripeCustomerId,
+  hideTeamToggle = false,
 }: {
   currentPlan:      PlanId;
   stripeCustomerId: string | null;
+  hideTeamToggle?:  boolean;
 }) {
   const router = useRouter();
   const [planType, setPlanType] = useState<PlanType>('individual');
@@ -388,8 +390,8 @@ export function PricingTable({
     <div className="space-y-6">
       {/* Toggles */}
       <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-between">
-        <TypeToggle  value={planType} onChange={setPlanType} />
-        <CycleToggle value={cycle}    onChange={setCycle}    />
+        {!hideTeamToggle && <TypeToggle value={planType} onChange={setPlanType} />}
+        <CycleToggle value={cycle} onChange={setCycle} />
       </div>
 
       {/* Cards */}

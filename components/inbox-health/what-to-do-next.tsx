@@ -52,7 +52,7 @@ function ActionCard({ icon: Icon, title, body, cta, href, done }: Omit<Card, 'pr
   );
 }
 
-export function WhatToDoNext({ summary }: { summary: HomepageSummary }) {
+export function WhatToDoNext({ summary, embedded }: { summary: HomepageSummary; embedded?: boolean }) {
   const { refreshStatus, neverEngageCount, neverEngageEmails, bundleableSenders, autopilotEnabled } = summary;
 
   // Still scanning — show a single waiting card
@@ -112,15 +112,22 @@ export function WhatToDoNext({ summary }: { summary: HomepageSummary }) {
   return (
     <div className="space-y-2.5">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-          {allDone ? 'Inbox in great shape' : 'What to do next'}
+        <h2 className={cn(
+          'font-semibold',
+          embedded
+            ? 'text-sm text-foreground'
+            : 'text-sm text-muted-foreground uppercase tracking-wide',
+        )}>
+          {allDone ? 'Inbox in great shape' : embedded ? 'Inbox tasks' : 'What to do next'}
         </h2>
-        <Link
-          href="/sender-intelligence"
-          className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-        >
-          Open Inbox Cleaner <ArrowRight className="w-3 h-3" />
-        </Link>
+        {!embedded && (
+          <Link
+            href="/sender-intelligence"
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+          >
+            Open Inbox Cleaner <ArrowRight className="w-3 h-3" />
+          </Link>
+        )}
       </div>
       {cards.map((card) => (
         <ActionCard key={card.title} {...card} />

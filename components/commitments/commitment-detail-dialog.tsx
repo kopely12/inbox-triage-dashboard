@@ -16,9 +16,10 @@ import { DueDateCell, NoteEditor, PriorityButton } from './commitment-row-action
 import { cn } from '@/lib/utils';
 import type { Commitment } from './commitments-client';
 
-function gmailUrl(threadId: string | null) {
+function gmailUrl(threadId: string | null, userEmail?: string | null) {
   if (!threadId || threadId.startsWith('compose_') || threadId.startsWith('manual_')) return null;
-  return `https://mail.google.com/mail/u/0/#all/${threadId}`;
+  const account = userEmail ? encodeURIComponent(userEmail) : '0';
+  return `https://mail.google.com/mail/u/${account}/#all/${threadId}`;
 }
 
 // ── Props ──────────────────────────────────────────────────────────────────────
@@ -26,12 +27,13 @@ function gmailUrl(threadId: string | null) {
 interface Props {
   commitment: Commitment | null; // null = closed
   todayStr:   string;
+  userEmail:  string | null;
   onClose:    () => void;
 }
 
 // ── CommitmentDetailDialog ────────────────────────────────────────────────────
 
-export function CommitmentDetailDialog({ commitment: c, todayStr, onClose }: Props) {
+export function CommitmentDetailDialog({ commitment: c, todayStr, userEmail, onClose }: Props) {
   const [pending, startTransition] = useTransition();
 
   const open = c !== null;
@@ -41,7 +43,7 @@ export function CommitmentDetailDialog({ commitment: c, todayStr, onClose }: Pro
   const isDismissed = c ? c.status === 'dismissed' : false;
   const isOverdue   = c ? c.status === 'open' && !!c.due_date && c.due_date < todayStr : false;
   const counterparty = c ? c.counterparty || c.counterparty_email || null : null;
-  const gmail        = c ? gmailUrl(c.thread_id) : null;
+  const gmail        = c ? gmailUrl(c.thread_id, userEmail) : null;
 
   function handleDone() {
     if (!c) return;

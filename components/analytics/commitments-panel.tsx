@@ -20,48 +20,37 @@ export function CommitmentsPanel({
   keptRate,
   overdueCount,
   openCount,
-  avgResolutionDays,
   fulfillmentTrend,
   rangeLabel,
-  thisWeekCreated,
-  lastWeekCreated,
 }: {
-  chartData:         CommitmentPoint[];
-  keptRate:          number | null;
-  overdueCount:      number;
-  openCount:         number;
-  avgResolutionDays: number | null;
-  fulfillmentTrend:  number | null;
-  rangeLabel:        string;
-  thisWeekCreated:   number;
-  lastWeekCreated:   number;
+  chartData:        CommitmentPoint[];
+  keptRate:         number | null;
+  overdueCount:     number;
+  openCount:        number;
+  fulfillmentTrend: number | null;
+  rangeLabel:       string;
 }) {
   const isEmpty = chartData.every((d) => d.created === 0 && d.resolved === 0);
-
-  const wowPct =
-    lastWeekCreated > 0
-      ? Math.round(((thisWeekCreated - lastWeekCreated) / lastWeekCreated) * 100)
-      : null;
 
   return (
     <div className="space-y-5">
       {/* ── Stat row ─────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-4 gap-4 pb-4 border-b border-border">
+      <div className="grid grid-cols-2 gap-6 pb-4 border-b border-border">
 
         {/* Promises kept */}
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           <p className="text-xs text-muted-foreground">Promises kept</p>
           {keptRate !== null ? (
             <>
               <p className={cn(
-                'text-2xl font-semibold',
+                'text-3xl font-semibold',
                 keptRate >= 80 ? 'text-green-600 dark:text-green-400'
                   : keptRate >= 50 ? 'text-amber-500'
                   : 'text-red-500',
               )}>
                 {keptRate}%
               </p>
-              <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
+              <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                 <div
                   className={cn('h-full rounded-full', keptRate >= 80 ? 'bg-green-500' : keptRate >= 50 ? 'bg-amber-500' : 'bg-red-500')}
                   style={{ width: `${keptRate}%` }}
@@ -84,62 +73,28 @@ export function CommitmentsPanel({
             </>
           ) : (
             <>
-              <p className="text-2xl font-semibold text-muted-foreground">—</p>
-              <p className="text-xs text-muted-foreground">Need 5+ commitments</p>
+              <p className="text-3xl font-semibold text-muted-foreground">—</p>
+              <p className="text-xs text-muted-foreground">Need 3+ commitments</p>
             </>
           )}
         </div>
 
-        {/* Avg time to close */}
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">Avg time to close</p>
-          <p className="text-2xl font-semibold">
-            {avgResolutionDays !== null ? (
-              avgResolutionDays < 1 ? '<1d' :
-              avgResolutionDays < 7 ? `${Math.round(avgResolutionDays)}d` :
-              `${(avgResolutionDays / 7).toFixed(1)}w`
-            ) : '—'}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {avgResolutionDays !== null ? 'from detection to done' : 'no resolved data'}
-          </p>
-        </div>
-
         {/* Open */}
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           <p className="text-xs text-muted-foreground">Still open</p>
-          <p className={cn('text-2xl font-semibold', openCount > 0 && overdueCount > 0 ? 'text-amber-500' : '')}>
+          <p className={cn('text-3xl font-semibold', overdueCount > 0 ? 'text-amber-500' : '')}>
             {openCount}
           </p>
           {overdueCount > 0 ? (
             <>
-              <p className="text-xs text-red-500 font-medium">
-                {overdueCount} overdue
-              </p>
+              <p className="text-xs text-red-500 font-medium">{overdueCount} overdue</p>
               <p className="text-xs text-muted-foreground">
                 {overdueCount === 1 ? 'needs attention' : 'need attention'}
               </p>
             </>
           ) : (
-            <p className="text-xs text-green-600 dark:text-green-400">
-              Clean slate — none overdue
-            </p>
+            <p className="text-xs text-green-600 dark:text-green-400">None overdue</p>
           )}
-        </div>
-
-        {/* New this week */}
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">Made this week</p>
-          <p className="text-2xl font-semibold">{thisWeekCreated}</p>
-          <p className="text-xs text-muted-foreground">
-            {wowPct !== null ? (
-              <span className={wowPct < 0 ? 'text-green-600 dark:text-green-400' : ''}>
-                {wowPct > 0 ? '+' : ''}{wowPct}% vs last week
-              </span>
-            ) : (
-              `vs ${lastWeekCreated} last week`
-            )}
-          </p>
         </div>
       </div>
 

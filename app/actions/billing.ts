@@ -4,13 +4,13 @@ import { auth } from '@/auth';
 import { stripe } from '@/lib/stripe';
 import { supabaseAdmin } from '@/lib/supabase';
 
-const BASE_URL = process.env.NEXTAUTH_URL ?? 'https://inbox-triage-dashboard.vercel.app';
+const BASE_URL = process.env.NEXTAUTH_URL ?? 'https://my.iinbox.io';
 
 const PRICES = {
-  pro_monthly:  process.env.STRIPE_PRO_MONTHLY_PRICE_ID!,
-  pro_annual:   process.env.STRIPE_PRO_ANNUAL_PRICE_ID!,
-  team_monthly: process.env.STRIPE_TEAM_MONTHLY_PRICE_ID!,
-} as const;
+  pro_monthly:  process.env.STRIPE_PRO_MONTHLY_PRICE_ID,
+  pro_annual:   process.env.STRIPE_PRO_ANNUAL_PRICE_ID,
+  team_monthly: process.env.STRIPE_TEAM_MONTHLY_PRICE_ID,
+};
 
 // ── Pro checkout ──────────────────────────────────────────────────────────────
 
@@ -45,9 +45,12 @@ export async function createProCheckoutUrl(
       .eq('id', userId);
   }
 
+  const priceId = PRICES[priceKey];
+  if (!priceId) return { error: 'Pricing not configured — contact support' };
+
   const checkout = await stripe.checkout.sessions.create({
     customer:    customerId,
-    line_items:  [{ price: PRICES[priceKey], quantity: 1 }],
+    line_items:  [{ price: priceId, quantity: 1 }],
     mode:        'subscription',
     success_url: `${BASE_URL}/billing?upgraded=1`,
     cancel_url:  `${BASE_URL}/billing`,
@@ -90,9 +93,12 @@ export async function createTeamCheckoutUrl(
       .eq('id', orgId);
   }
 
+  const teamPriceId = PRICES.team_monthly;
+  if (!teamPriceId) return { error: 'Team pricing not configured — contact support' };
+
   const checkout = await stripe.checkout.sessions.create({
     customer:    customerId,
-    line_items:  [{ price: PRICES.team_monthly, quantity: seatCount }],
+    line_items:  [{ price: teamPriceId, quantity: seatCount }],
     mode:        'subscription',
     success_url: `${BASE_URL}/team?upgraded=1`,
     cancel_url:  `${BASE_URL}/team`,

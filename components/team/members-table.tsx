@@ -10,7 +10,8 @@ import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { Crown, Loader2, Copy, Check, X, Search, RefreshCw } from 'lucide-react';
+import { Crown, Loader2, Copy, Check, X, Search, RefreshCw, Users } from 'lucide-react';
+import { InviteModal } from './invite-modal';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -132,9 +133,14 @@ function MemberRow({ member, currentUserId, isAdmin, viewerIsOwner }: {
           <select
             defaultValue={member.role}
             disabled={pending}
-            onChange={(e) => startTransition(() => {
-              changeRole(member.id, e.target.value as 'admin' | 'member');
-            })}
+            onChange={(e) => {
+              const newRole = e.target.value as 'admin' | 'member';
+              startTransition(async () => {
+                const result = await changeRole(member.id, newRole);
+                if (result?.error) toast.error(result.error);
+                else toast.success(`${name}'s role updated to ${newRole}`);
+              });
+            }}
             className="h-7 text-xs rounded-md border border-input bg-background px-2 shrink-0"
           >
             <option value="member">Member</option>
@@ -291,7 +297,11 @@ function InviteRow({ invite, baseUrl }: { invite: Invite; baseUrl: string }) {
         className="w-7 h-7 shrink-0 text-muted-foreground hover:text-destructive"
         disabled={pending}
         title="Revoke invite"
-        onClick={() => startTransition(() => { revokeInvite(invite.id); })}
+        onClick={() => startTransition(async () => {
+          const result = await revokeInvite(invite.id);
+          if (result?.error) toast.error(result.error);
+          else toast.success(`Invite for ${invite.email} revoked`);
+        })}
       >
         {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
       </Button>
@@ -333,7 +343,16 @@ export function MembersTable({
   const showSearch = totalRows >= 8; // search is useful once the list grows
 
   if (!hasRows) {
-    return <p className="text-sm text-muted-foreground py-4 text-center">No members yet.</p>;
+    return (
+      <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+        <Users className="w-8 h-8 text-muted-foreground/40" />
+        <div>
+          <p className="text-sm font-medium">No members yet</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Invite someone to get started</p>
+        </div>
+        {isAdmin && <InviteModal />}
+      </div>
+    );
   }
 
   return (

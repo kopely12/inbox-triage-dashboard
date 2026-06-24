@@ -43,15 +43,25 @@ function actionLabel(action: string | null) {
 
 // ── ActiveJobBanner — shown in the main page while a job is running ───────────
 
+// 240 attempts × 3 s = 12 minutes max polling time before showing a stale warning.
+const MAX_POLL_ATTEMPTS = 240;
+
 export function ActiveJobBanner({ jobId, onComplete }: { jobId: string; onComplete: () => void }) {
   const [job, setJob] = useState<CleanupJob | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
 
   useEffect(() => {
     if (!jobId) return;
     let cancelled = false;
+    let attempts  = 0;
 
     async function poll() {
       while (!cancelled) {
+        attempts++;
+        if (attempts > MAX_POLL_ATTEMPTS) {
+          setTimedOut(true);
+          break;
+        }
         const { job: data } = await getJob(jobId);
         if (!data || cancelled) break;
         setJob(data);
@@ -76,6 +86,26 @@ export function ActiveJobBanner({ jobId, onComplete }: { jobId: string; onComple
   }, [jobId, onComplete]);
 
   if (!job || job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') return null;
+
+  if (timedOut) {
+    return (
+      <div className="flex items-center gap-3 px-6 py-3 bg-amber-50 border-b border-amber-200 shrink-0">
+        <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+        <span className="text-sm text-amber-800 flex-1">
+          Job is taking longer than expected — check back later.
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0 h-7 text-xs"
+          onClick={() => window.location.reload()}
+        >
+          Refresh
+        </Button>
+      </div>
+    );
+  }
+
   const pct = progressPercent(job);
 
   return (
