@@ -29,7 +29,7 @@ const ISSUE_META: Record<FilterIssueType, {
 }> = {
   orphaned: {
     label:       'Orphaned',
-    description: 'Inbox Triage created this filter, but it no longer makes sense — the sender was unsubscribed or became a trusted contact.',
+    description: 'iinbox created this filter, but it no longer makes sense — the sender was unsubscribed or became a trusted contact.',
     icon:        Archive,
     color:       'text-amber-700',
     bg:          'bg-amber-50 border-amber-200',
@@ -52,8 +52,8 @@ const ISSUE_META: Record<FilterIssueType, {
     canDelete:   true,
   },
   untracked: {
-    label:       'Not managed by Inbox Triage',
-    description: 'This filter removes emails from your inbox but was not created by Inbox Triage. Review it to make sure it is intentional.',
+    label:       'Not managed by iinbox',
+    description: 'This filter removes emails from your inbox but was not created by iinbox. Review it to make sure it is intentional.',
     icon:        Eye,
     color:       'text-purple-700',
     bg:          'bg-purple-50 border-purple-200',
@@ -61,7 +61,7 @@ const ISSUE_META: Record<FilterIssueType, {
   },
   stale_reference: {
     label:       'Missing from Gmail',
-    description: 'Inbox Triage thinks this filter exists but it was deleted directly in Gmail. We can clean up our records.',
+    description: 'iinbox thinks this filter exists but it was deleted directly in Gmail. We can clean up our records.',
     icon:        AlertTriangle,
     color:       'text-red-700',
     bg:          'bg-red-50 border-red-200',
@@ -243,7 +243,7 @@ export function FilterAuditTab({ embedded = false }: { embedded?: boolean }) {
               <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/40 rounded-md px-3 py-2.5 border border-border">
                 <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                 <span>
-                  Untracked filters are shown for awareness only — Inbox Triage won&apos;t delete
+                  Untracked filters are shown for awareness only — iinbox won&apos;t delete
                   them automatically. Review them in{' '}
                   <a
                     href={`https://mail.google.com/mail/u/${gmailAcct}/#settings/filters`}

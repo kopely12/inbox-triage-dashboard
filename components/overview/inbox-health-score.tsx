@@ -128,7 +128,7 @@ const COMPONENT_INFO: Record<string, React.ReactNode> = {
         <li>→ Full 20 pts when all unsubscribeable noise senders are unsubscribed</li>
         <li>→ 0 pts when none are (even if you delete their emails)</li>
       </ul>
-      <p className="mt-1.5 font-medium text-foreground">Improve: use Unsubscribe in Inbox Cleaner — Inbox Triage sends the request automatically.</p>
+      <p className="mt-1.5 font-medium text-foreground">Improve: use Unsubscribe in Inbox Cleaner — iinbox sends the request automatically.</p>
     </>
   ),
 
@@ -147,12 +147,12 @@ const COMPONENT_INFO: Record<string, React.ReactNode> = {
   'Reply health': (
     <>
       <p className="font-semibold text-foreground">Reply Health · up to 15 pts</p>
-      <p>Tracks senders you&apos;ve already told to stop emailing you — detected when Inbox Triage sees a reply with opt-out language like &quot;stop emailing me&quot; or &quot;unsubscribe&quot; — but who you haven&apos;t formally unsubscribed from yet.</p>
+      <p>Tracks senders you&apos;ve already told to stop emailing you — detected when iinbox sees a reply with opt-out language like &quot;stop emailing me&quot; or &quot;unsubscribe&quot; — but who you haven&apos;t formally unsubscribed from yet.</p>
       <ul className="mt-1.5 space-y-0.5 text-muted-foreground">
         <li>→ Full 15 pts when no opt-out replies are unresolved</li>
         <li>→ Loses ~3 pts per unresolved opt-out (floors at 0)</li>
       </ul>
-      <p className="mt-1.5 font-medium text-foreground">Improve: Inbox Triage detects these replies automatically. Find flagged senders in Inbox Cleaner and officially unsubscribe.</p>
+      <p className="mt-1.5 font-medium text-foreground">Improve: iinbox detects these replies automatically. Find flagged senders in Inbox Cleaner and officially unsubscribe.</p>
     </>
   ),
 };

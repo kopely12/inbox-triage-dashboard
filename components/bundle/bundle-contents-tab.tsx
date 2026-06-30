@@ -323,7 +323,7 @@ export function BundleContentsTab() {
             className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
             <ExternalLink className="w-3.5 h-3.5" />
-            Open InboxTriage/Bundle label in Gmail
+            Open iinbox/Bundle label in Gmail
           </a>
         </div>
       </div>

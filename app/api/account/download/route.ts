@@ -99,7 +99,7 @@ export async function GET() {
     triage_sessions: triageSessions ?? [],
   };
 
-  const filename = `inbox-triage-${new Date().toISOString().split('T')[0]}.json`;
+  const filename = `iinbox-${new Date().toISOString().split('T')[0]}.json`;
 
   return new NextResponse(JSON.stringify(payload, null, 2), {
     headers: {

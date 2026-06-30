@@ -37,7 +37,7 @@ export type Recommendation = {
 };
 
 // ── localStorage key ──────────────────────────────────────────────────────────
-const DISMISSED_RECS_KEY = 'inbox-triage:dismissed-recs';
+const DISMISSED_RECS_KEY = 'iinbox:dismissed-recs';
 
 // ── Email type emoji map ──────────────────────────────────────────────────────
 const TYPE_EMOJI: Record<string, string> = {

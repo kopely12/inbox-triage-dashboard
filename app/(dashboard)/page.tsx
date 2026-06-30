@@ -10,7 +10,7 @@ import {
 import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
-export const metadata = { title: 'Overview — Inbox Triage' };
+export const metadata = { title: 'Overview — iinbox' };
 
 export default async function HomePage() {
   const session = await auth();

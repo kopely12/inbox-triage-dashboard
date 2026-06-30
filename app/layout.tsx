@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Inbox Triage',
-  description: 'Manage your Inbox Triage account, billing, and team.',
+  title: 'iinbox',
+  description: 'Manage your iinbox account, billing, and team.',
 };
 
 export default function RootLayout({

@@ -119,7 +119,7 @@ export function InboxHealthTab({ data }: { data: InboxHealthData }) {
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium">Inbox volume — {rangeLabel}</CardTitle>
           <CardDescription>
-            Email volume by category. If Triago is working, total volume should trend down.
+            Email volume by category. If iinbox is working, total volume should trend down.
           </CardDescription>
         </CardHeader>
         <CardContent>

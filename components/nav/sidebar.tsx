@@ -112,12 +112,9 @@ export function Sidebar() {
         collapsed ? 'px-3 py-3 justify-center' : 'px-5 py-3',
       )}>
         {collapsed ? (
-          /* Collapsed: clip to icon portion (paper plane on left side of wordmark) */
-          <div style={{ width: 40, height: 40, overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
-            <img src="/logo.png" alt="Triago" style={{ height: 40, width: 'auto', maxWidth: 'none', flexShrink: 0 }} />
-          </div>
+          <img src="/icon.svg" alt="iinbox" style={{ width: 32, height: 32 }} />
         ) : (
-          <img src="/logo.png" alt="Triago" style={{ height: 40, width: 'auto' }} />
+          <img src="/logo.png" alt="iinbox" style={{ height: 32, width: 'auto' }} />
         )}
       </div>
 

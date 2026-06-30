@@ -12,7 +12,7 @@ import { Card, CardContent }     from '@/components/ui/card';
 import { AnalyticsClient }       from '@/components/analytics/analytics-client';
 import { getInboxVolume }        from '@/app/actions/engagement';
 
-export const metadata = { title: 'Analytics — Inbox Triage' };
+export const metadata = { title: 'Analytics — iinbox' };
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 

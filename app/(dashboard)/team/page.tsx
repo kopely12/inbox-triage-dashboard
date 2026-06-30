@@ -12,7 +12,7 @@ import { BillingCard }   from '@/components/team/billing-card';
 import { OrgNameForm }   from '@/components/settings/org-name-form';
 import { Activity, Mail, Settings2, UserCheck, Users } from 'lucide-react';
 
-export const metadata = { title: 'Team — Inbox Triage' };
+export const metadata = { title: 'Team — iinbox' };
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', {
@@ -83,7 +83,7 @@ export default async function TeamPage() {
     activityInvites = activityData  ?? [];
   }
 
-  const baseUrl  = process.env.NEXTAUTH_URL ?? 'https://inbox-triage-dashboard.vercel.app';
+  const baseUrl  = process.env.NEXTAUTH_URL ?? 'https://dashboard.iinbox.io';
   const isAdmin  = role === 'admin' || role === 'owner';
   const isOwner  = role === 'owner';
 

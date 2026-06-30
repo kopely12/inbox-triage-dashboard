@@ -1,7 +1,6 @@
 import { signIn } from '@/auth';
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
-import { Mail } from 'lucide-react';
 
 export default async function LoginPage() {
   const session = await auth();
@@ -11,15 +10,10 @@ export default async function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="flex flex-col items-center gap-8 w-full max-w-sm px-6">
 
-        {/* Logo mark */}
+        {/* Logo */}
         <div className="flex flex-col items-center gap-3">
-          <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-primary shadow-sm">
-            <Mail className="w-6 h-6 text-primary-foreground" />
-          </div>
-          <div className="text-center">
-            <h1 className="text-xl font-semibold tracking-tight">Inbox Triage</h1>
-            <p className="text-sm text-muted-foreground mt-1">Sign in to manage your account</p>
-          </div>
+          <img src="/logo.png" alt="iinbox" style={{ height: 36, width: 'auto' }} />
+          <p className="text-sm text-muted-foreground">Sign in to manage your account</p>
         </div>
 
         {/* Sign-in card */}

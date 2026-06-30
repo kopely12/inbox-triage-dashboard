@@ -70,7 +70,7 @@ const COMPONENT_INFO: Record<string, React.ReactNode> = {
         <li>→ Full 20 pts when all unsubscribeable noise senders are unsubscribed</li>
         <li>→ 0 pts when none are, even if you delete their emails</li>
       </ul>
-      <p className="mt-1.5 font-medium text-foreground">Improve: use Unsubscribe in Inbox Cleaner — Inbox Triage sends the request automatically.</p>
+      <p className="mt-1.5 font-medium text-foreground">Improve: use Unsubscribe in Inbox Cleaner — iinbox sends the request automatically.</p>
     </>
   ),
   'Recent activity': (
@@ -108,7 +108,7 @@ const STAT_INFO = {
   canUnsubscribe: (
     <>
       <p className="font-semibold text-foreground">Can Unsubscribe</p>
-      <p>Noise senders who include a working unsubscribe link that Inbox Triage can send on your behalf.</p>
+      <p>Noise senders who include a working unsubscribe link that iinbox can send on your behalf.</p>
       <p className="text-muted-foreground mt-1">Formally unsubscribing stops future emails — more effective than deleting, which only removes existing ones.</p>
     </>
   ),
@@ -245,7 +245,7 @@ function getComponentTip(
     case 'Subscription debt': {
       const remaining = metadata.unsubscribeable - metadata.unsubscribed;
       if (remaining <= 0) return null;
-      return `${remaining} noise sender${remaining !== 1 ? 's' : ''} have unsubscribe links — let Inbox Triage send opt-out requests automatically`;
+      return `${remaining} noise sender${remaining !== 1 ? 's' : ''} have unsubscribe links — let iinbox send opt-out requests automatically`;
     }
     case 'Recent activity':
       if (metadata.days_since_action < 30) return null;

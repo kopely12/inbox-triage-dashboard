@@ -3,7 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { redirect }      from 'next/navigation';
 import { CommitmentsClient } from '@/components/commitments/commitments-client';
 
-export const metadata = { title: 'Track — Inbox Triage' };
+export const metadata = { title: 'Track — iinbox' };
 
 type StatusFilter    = 'open' | 'overdue' | 'done' | 'dismissed';
 type DirectionFilter = 'all' | 'outgoing' | 'assigned';

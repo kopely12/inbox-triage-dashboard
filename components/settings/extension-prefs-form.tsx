@@ -26,14 +26,14 @@ import { cn } from '@/lib/utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Tab = 'account' | 'scanning' | 'rules' | 'workflows' | 'interface';
+type Tab = 'account' | 'scanning' | 'automation' | 'rules' | 'interface';
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'account',   label: 'Account'   },
-  { id: 'scanning',  label: 'Scanning'  },
-  { id: 'rules',     label: 'Rules'     },
-  { id: 'workflows', label: 'Workflows' },
-  { id: 'interface', label: 'Interface' },
+  { id: 'account',    label: 'Account'    },
+  { id: 'scanning',   label: 'Scanning'   },
+  { id: 'automation', label: 'Automation' },
+  { id: 'rules',      label: 'Rules'      },
+  { id: 'interface',  label: 'Interface'  },
 ];
 
 export type InvoiceRow = {
@@ -453,7 +453,7 @@ export function ExtensionPrefsForm({
       {/* Header */}
       <div className="mb-5">
         <h2 className="text-lg font-semibold">Settings</h2>
-        <p className="text-sm text-muted-foreground">Configure your Inbox Triage account and preferences.</p>
+        <p className="text-sm text-muted-foreground">Configure your iinbox account and preferences.</p>
       </div>
 
       {/* Tab bar */}
@@ -807,22 +807,22 @@ export function ExtensionPrefsForm({
           <>
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium">Sender rules</CardTitle>
-                <CardDescription>Override how specific senders are treated — regardless of their learned score.</CardDescription>
+                <CardTitle className="text-sm font-medium">Triage sender overrides</CardTitle>
+                <CardDescription>Force specific senders to always be included or excluded from triage, and pin their urgency level.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-5 pl-6">
                 <div className="space-y-2">
-                  <Label>Always surface</Label>
+                  <Label>Always include in triage</Label>
                   <textarea rows={3} value={whitelist} onChange={(e) => { setWhitelist(e.target.value); markDirty(); }} disabled={disabled} placeholder={'boss@company.com\n@vip-client.com'} className={textareaCls} />
-                  <p className="text-xs text-muted-foreground">One email or domain per line. These senders always pass through the noise filter.</p>
+                  <p className="text-xs text-muted-foreground">One email or domain per line. These senders are always triaged, even if their emails look like noise.</p>
                 </div>
                 <div className="space-y-2">
-                  <Label>Always skip</Label>
+                  <Label>Always exclude from triage</Label>
                   <textarea rows={3} value={blacklist} onChange={(e) => { setBlacklist(e.target.value); markDirty(); }} disabled={disabled} placeholder={'noreply@notifications.com\n@marketing-blasts.net'} className={textareaCls} />
-                  <p className="text-xs text-muted-foreground">One email or domain per line. These senders are always filtered out.</p>
+                  <p className="text-xs text-muted-foreground">One email or domain per line. These senders are never included in triage.</p>
                 </div>
                 <div className="space-y-2">
-                  <Label>Priority overrides</Label>
+                  <Label>Urgency overrides</Label>
                   <PriorityRulesEditor rules={priorityRules} onChange={mk(setPriorityRules)} />
                 </div>
               </CardContent>
@@ -858,44 +858,55 @@ export function ExtensionPrefsForm({
           </>
         )}
 
-        {/* ── Workflows ────────────────────────────────────────────────────── */}
-        {tab === 'workflows' && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium">Tasks & commitments</CardTitle>
-              <CardDescription>Control how the extension tracks what you owe and what you&apos;re owed.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-1 divide-y divide-border pl-6">
-              <ToggleRow
-                label="Detect commitments when composing"
-                description="Scan emails you send and extract &quot;I will…&quot; commitments automatically."
-                checked={composeDetection}
-                onChange={mk(setComposeDetection)}
-                disabled={disabled}
-              />
-              <ToggleRow
-                label="Suggest follow-up reminders"
-                description="When you send an email, offer to create a follow-up if no reply arrives."
-                checked={followupSuggestions}
-                onChange={mk(setFollowupSuggestions)}
-                disabled={disabled}
-              />
-              <ToggleRow
-                label="AI-drafted reply suggestions"
-                description="Show a suggested reply draft when you open a triage card."
-                checked={draftReplies}
-                onChange={mk(setDraftReplies)}
-                disabled={disabled}
-              />
-              <ToggleRow
-                label="AI Draft Queue"
-                description="After each triage run, pre-generate ready-to-send replies for your Needs Reply items. Launch the queue from the sidebar to review and send in one focused session."
-                checked={draftQueueEnabled}
-                onChange={(v) => { setDraftQueueEnabled(v); markDirty(); }}
-                disabled={disabled}
-              />
-            </CardContent>
-          </Card>
+        {/* ── Automation ───────────────────────────────────────────────────── */}
+        {tab === 'automation' && (
+          <>
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium">AI reply tools</CardTitle>
+                <CardDescription>Speed up your replies with AI-generated drafts and batch reply sessions.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-1 divide-y divide-border pl-6">
+                <ToggleRow
+                  label="AI-drafted reply suggestions"
+                  description="Show a suggested reply draft when you open a triage card."
+                  checked={draftReplies}
+                  onChange={mk(setDraftReplies)}
+                  disabled={disabled}
+                />
+                <ToggleRow
+                  label="AI Draft Queue"
+                  description="After each triage run, pre-generate ready-to-send replies for your Needs Reply items. Launch the queue from the sidebar to review and send in one focused session."
+                  checked={draftQueueEnabled}
+                  onChange={(v) => { setDraftQueueEnabled(v); markDirty(); }}
+                  disabled={disabled}
+                />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium">Tracking & commitments</CardTitle>
+                <CardDescription>Automatically track what you&apos;ve promised and who owes you a reply.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-1 divide-y divide-border pl-6">
+                <ToggleRow
+                  label="Detect commitments on send"
+                  description="After you hit Send, scan the email for &quot;I will…&quot; commitments and save them as tasks automatically."
+                  checked={composeDetection}
+                  onChange={mk(setComposeDetection)}
+                  disabled={disabled}
+                />
+                <ToggleRow
+                  label="Follow-up reminders"
+                  description="Adds a tracking pill to the Compose window. If no reply arrives after sending, a card appears in your Follow-up tab."
+                  checked={followupSuggestions}
+                  onChange={mk(setFollowupSuggestions)}
+                  disabled={disabled}
+                />
+              </CardContent>
+            </Card>
+          </>
         )}
 
         {/* ── Interface ────────────────────────────────────────────────────── */}
@@ -916,7 +927,7 @@ export function ExtensionPrefsForm({
                 />
                 <ToggleRow
                   label="Gmail folder labels"
-                  description='Creates "Inbox Triage/Needs Reply" and "Inbox Triage/Internal" as folders in your Gmail sidebar.'
+                  description='Creates "iinbox/Needs Reply" and "iinbox/Internal" as folders in your Gmail sidebar.'
                   checked={gmailFoldersEnabled}
                   onChange={mk(setGmailFoldersEnabled)}
                   disabled={disabled}

@@ -6,7 +6,7 @@ import { ExtensionPrefsForm, type BillingData } from '@/components/settings/exte
 import { PREFS_DEFAULTS, type ExtensionPrefs }  from '@/lib/extension-prefs';
 import { getAnalysisSchedule } from '@/app/actions/engagement';
 
-export const metadata = { title: 'Settings — Inbox Triage' };
+export const metadata = { title: 'Settings — iinbox' };
 
 export default async function PreferencesPage() {
   const session = await auth();

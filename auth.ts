@@ -17,15 +17,20 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async signIn({ user, account }) {
       if (account?.provider !== 'google' || !user.email) return false;
 
-      // Upsert user into our existing users table
+      // Upsert user into our existing users table.
+      // Save google_refresh_token when present — returned on first auth or when
+      // the user explicitly re-consents (e.g. via the Tune "Connect Gmail" flow).
+      const upsertData: Record<string, unknown> = {
+        email:      user.email,
+        google_id:  account.providerAccountId,
+        name:       user.name   ?? null,
+        avatar_url: user.image  ?? null,
+        updated_at: new Date().toISOString(),
+      };
+      if (account.refresh_token) upsertData.google_refresh_token = account.refresh_token;
+
       const { error } = await supabaseAdmin.from('users').upsert(
-        {
-          email:      user.email,
-          google_id:  account.providerAccountId,
-          name:       user.name   ?? null,
-          avatar_url: user.image  ?? null,
-          updated_at: new Date().toISOString(),
-        },
+        upsertData,
         { onConflict: 'email', ignoreDuplicates: false }
       );
 

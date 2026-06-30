@@ -3,10 +3,10 @@ import { auth }            from '@/auth';
 import { redirect }        from 'next/navigation';
 import { after }           from 'next/server';
 import { Sidebar }              from '@/components/nav/sidebar';
-import { Header }               from '@/components/nav/header';
 import { Toaster }              from '@/components/ui/sonner';
 import { ImpersonationBanner }  from '@/components/impersonation-banner';
 import { AnnouncementBanner }   from '@/components/announcement-banner';
+import { ExtensionBanner }      from '@/components/extension-banner';
 import { supabaseAdmin }        from '@/lib/supabase';
 import { getAnnouncement }      from '@/lib/get-announcement';
 
@@ -46,7 +46,7 @@ export default async function DashboardLayout({
           {/* Global announcement — topmost, shown before impersonation banner */}
           <AnnouncementBanner announcement={activeAnnouncement} />
           <ImpersonationBanner />
-          <Header />
+          <ExtensionBanner />
           <main className="flex-1 overflow-y-auto p-6">{children}</main>
         </div>
       </div>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useTransition, useMemo, useRef } from 'react';
 import { useRouter }        from 'next/navigation';
-import { useSession }       from 'next-auth/react';
+import { useSession, signIn } from 'next-auth/react';
 import { toast }            from 'sonner';
 import {
   Inbox, Trash2, Archive, BellOff, Undo2,
@@ -116,6 +116,7 @@ interface Props {
   failedUnsubscribes?:   FailedUnsub[];
   health?:               InboxHealthData | null;
   initialAlerts?:        InboxAlert[];
+  hasGmailConnection?:   boolean;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -618,6 +619,7 @@ export function SenderIntelligenceClient({
   failedUnsubscribes   = [] as FailedUnsub[],
   health               = null,
   initialAlerts        = [],
+  hasGmailConnection   = false,
 }: Props) {
   const router = useRouter();
   const { data: session } = useSession();
@@ -677,7 +679,7 @@ export function SenderIntelligenceClient({
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('inbox-triage:noise-baseline');
+      const stored = localStorage.getItem('iinbox:noise-baseline');
       if (stored) setNoiseBaseline(JSON.parse(stored));
     } catch {}
   }, []);
@@ -686,7 +688,7 @@ export function SenderIntelligenceClient({
 
   const autoAnalyzeFired = useRef(false);
   useEffect(() => {
-    if (isFree || autoAnalyzeFired.current) return;
+    if (autoAnalyzeFired.current) return;
     const isNever  = refreshStatus === 'never';
     const isStale  = refreshStatus === 'completed' && lastRefreshed !== null &&
                      Date.now() - new Date(lastRefreshed).getTime() > 60 * 60 * 1000;
@@ -781,7 +783,7 @@ export function SenderIntelligenceClient({
       total_noise_emails: summary.total_noise_emails,
       timestamp:          new Date().toISOString(),
     };
-    try { localStorage.setItem('inbox-triage:noise-baseline', JSON.stringify(newBaseline)); } catch {}
+    try { localStorage.setItem('iinbox:noise-baseline', JSON.stringify(newBaseline)); } catch {}
   }, [summary]);
 
   // ── Refresh trigger ──────────────────────────────────────────────────────────
@@ -976,7 +978,7 @@ export function SenderIntelligenceClient({
         total_noise_emails: summary.total_noise_emails,
         timestamp:          new Date().toISOString(),
       };
-      try { localStorage.setItem('inbox-triage:noise-baseline', JSON.stringify(snapshot)); } catch {}
+      try { localStorage.setItem('iinbox:noise-baseline', JSON.stringify(snapshot)); } catch {}
       setNoiseBaseline(snapshot);
       setCleanupBannerDismissed(false);
     }
@@ -1119,7 +1121,79 @@ export function SenderIntelligenceClient({
   // ═══════════════════════════════════════════════════════════════════════════
 
   // ── First-run scanning state — auto-started, no data yet ────────────────────
-  if ((refreshStatus === 'never' || refreshStatus === 'running') && initialSenders.length === 0) {
+  if (refreshStatus === 'never' && initialSenders.length === 0) {
+    if (!hasGmailConnection) {
+      return (
+        <div className="flex flex-col h-full">
+          <PageHeader />
+          <div className="flex flex-1 items-center justify-center">
+            <div className="text-center max-w-sm px-4">
+              <div className="flex justify-center mb-4">
+                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Inbox className="w-8 h-8 text-primary" />
+                </div>
+              </div>
+              <h2 className="text-lg font-semibold mb-2">Connect your Gmail</h2>
+              <p className="text-muted-foreground text-sm mb-6">
+                Tune analyzes your last 30 days of email to find senders you never open,
+                newsletters to bundle, and noise to clean up. It needs read access to your Gmail to get started.
+              </p>
+              <Button
+                onClick={() => signIn('google', { callbackUrl: '/sender-intelligence' }, {
+                  scope: [
+                    'openid', 'email', 'profile',
+                    'https://www.googleapis.com/auth/gmail.readonly',
+                    'https://www.googleapis.com/auth/gmail.modify',
+                    'https://www.googleapis.com/auth/gmail.send',
+                    'https://www.googleapis.com/auth/gmail.settings.basic',
+                    'https://www.googleapis.com/auth/contacts.readonly',
+                  ].join(' '),
+                  access_type: 'offline',
+                  prompt: 'consent',
+                })}
+              >
+                Connect Gmail
+              </Button>
+              <p className="text-xs text-muted-foreground mt-4">
+                Your emails are never stored — only sender-level statistics.
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-col h-full">
+        <PageHeader />
+        <div className="flex flex-1 items-center justify-center">
+          <div className="text-center max-w-sm px-4">
+            <div className="flex justify-center mb-4">
+              <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+                <Inbox className="w-8 h-8 text-muted-foreground" />
+              </div>
+            </div>
+            <h2 className="text-lg font-semibold mb-2">No inbox data yet</h2>
+            <p className="text-muted-foreground text-sm">
+              Tune analyzes your Gmail senders automatically once you run your first triage.
+            </p>
+            <p className="text-xs text-muted-foreground mt-4">
+              <a
+                href={`https://mail.google.com/mail/u/${gmailAcct}/`}
+                target="_blank"
+                rel="noopener"
+                className="text-primary underline-offset-2 hover:underline"
+              >
+                Open Gmail and run triage →
+              </a>
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (refreshStatus === 'running' && initialSenders.length === 0) {
     return (
       <div className="flex flex-col h-full">
         <PageHeader />

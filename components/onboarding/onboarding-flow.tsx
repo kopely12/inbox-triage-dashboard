@@ -35,7 +35,7 @@ const PILLARS = [
     id:          'track',
     pillar:      'Track',
     tagline:     'Never drop a ball. Never miss a follow-up.',
-    description: 'Inbox Triage watches both sides of every conversation — what you\'ve committed to and what you\'re waiting on — so nothing slips through the cracks.',
+    description: 'iinbox watches both sides of every conversation — what you\'ve committed to and what you\'re waiting on — so nothing slips through the cracks.',
     features: [
       'Automatically detects commitments in emails you send — no tagging required',
       'Tracks every thread where you\'re waiting on a reply from someone else',
@@ -88,7 +88,7 @@ export function OnboardingFlow({ onComplete, showCta = true }: Props) {
 
       {/* Header */}
       <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold tracking-tight">How Inbox Triage works</h2>
+        <h2 className="text-2xl font-bold tracking-tight">How iinbox works</h2>
         <p className="text-sm text-muted-foreground max-w-md mx-auto">
           Three pillars that turn your Gmail into a system — so nothing piles up, nothing slips, and the noise stays out.
         </p>

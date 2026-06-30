@@ -8,7 +8,7 @@ import type { RecentUnsubscribe }   from '@/components/sender-intelligence/sende
 import { getScreenerQueue, getSenderTypeStats, getInboxHealth } from '@/app/actions/engagement';
 import { getProtectionAlerts } from '@/app/actions/protection';
 
-export const metadata = { title: 'Tune — Inbox Triage' };
+export const metadata = { title: 'Tune — iinbox' };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -66,7 +66,7 @@ export default async function SenderIntelligencePage() {
     // Refresh state + plan
     supabaseAdmin
       .from('users')
-      .select('engagement_refresh_status, engagement_last_refreshed, plan_tier')
+      .select('engagement_refresh_status, engagement_last_refreshed, plan_tier, google_refresh_token')
       .eq('id', userId)
       .single(),
 
@@ -180,9 +180,10 @@ export default async function SenderIntelligencePage() {
     getProtectionAlerts(),
   ]);
 
-  const refreshStatus = user?.engagement_refresh_status ?? 'never';
-  const lastRefreshed = user?.engagement_last_refreshed ?? null;
-  const planTier      = user?.plan_tier                 ?? 'free';
+  const refreshStatus      = user?.engagement_refresh_status ?? 'never';
+  const lastRefreshed      = user?.engagement_last_refreshed ?? null;
+  const planTier           = user?.plan_tier                 ?? 'free';
+  const hasGmailConnection = !!user?.google_refresh_token;
 
   // ── Noise senders summary ─────────────────────────────────────────────────────
   const rows = senders ?? [];
@@ -338,6 +339,7 @@ export default async function SenderIntelligencePage() {
       refreshStatus={refreshStatus}
       lastRefreshed={lastRefreshed}
       planTier={planTier}
+      hasGmailConnection={hasGmailConnection}
       queryError={error?.message ?? null}
       contacts={contacts}
       domainRulesCount={domainRulesCount}
