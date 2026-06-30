@@ -3,8 +3,9 @@ import Google from 'next-auth/providers/google';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  // Vercel auto-sets VERCEL_URL; fall back to NEXTAUTH_URL for local dev
-  ...(process.env.NEXTAUTH_URL && { trustHost: true }),
+  // Allow any verified host (Railway, Vercel, custom domains).
+  // NEXTAUTH_URL / AUTH_URL still scopes allowed callback URLs.
+  trustHost: true,
 
   providers: [
     Google({
