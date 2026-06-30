@@ -689,6 +689,7 @@ export function SenderIntelligenceClient({
   const autoAnalyzeFired = useRef(false);
   useEffect(() => {
     if (autoAnalyzeFired.current) return;
+    if (!hasGmailConnection) return; // no token yet — wait for user to connect
     const isNever  = refreshStatus === 'never';
     const isStale  = refreshStatus === 'completed' && lastRefreshed !== null &&
                      Date.now() - new Date(lastRefreshed).getTime() > 60 * 60 * 1000;
