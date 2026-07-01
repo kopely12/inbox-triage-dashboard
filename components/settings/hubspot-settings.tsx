@@ -5,7 +5,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
 import {
   disconnectHubSpot,
   updateHubSpotSettings,
@@ -125,10 +124,12 @@ export function HubSpotSettings({
                 <Label htmlFor={`pipeline-${p.pipeline_id}`} className="text-sm font-normal cursor-pointer">
                   {p.pipeline_label}
                 </Label>
-                <Switch
+                <input
+                  type="checkbox"
                   id={`pipeline-${p.pipeline_id}`}
                   checked={enabledPipelines.has(p.pipeline_id)}
-                  onCheckedChange={(checked) => togglePipeline(p.pipeline_id, checked)}
+                  onChange={(e) => togglePipeline(p.pipeline_id, e.target.checked)}
+                  className="accent-primary w-4 h-4 cursor-pointer"
                 />
               </div>
             ))
