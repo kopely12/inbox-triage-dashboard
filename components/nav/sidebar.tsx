@@ -17,6 +17,7 @@ import {
   PanelLeftOpen,
   Inbox,
   Activity,
+  Plug,
 } from 'lucide-react';
 import { Badge }  from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -45,9 +46,9 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/sender-intelligence', label: 'Tune',         icon: Inbox,       adminOnly: false },
   { href: '/track',               label: 'Track',         icon: CheckSquare, adminOnly: false },
   { href: '/analytics',           label: 'Analytics',     icon: BarChart2,   adminOnly: false },
-  { href: '/preferences', label: 'Settings', icon: Settings2, adminOnly: false, dividerBefore: true,
-    subItems: [{ href: '/settings/hubspot', label: 'HubSpot' }] },
-  { href: '/team',    label: 'Team',    icon: Users,       adminOnly: true, teamOnly: true },
+  { href: '/preferences',      label: 'Settings', icon: Settings2, adminOnly: false, dividerBefore: true },
+  { href: '/settings/hubspot', label: 'HubSpot',  icon: Plug,      adminOnly: false },
+  { href: '/team',             label: 'Team',      icon: Users,     adminOnly: true, teamOnly: true },
 ];
 
 // ── useHash hook ──────────────────────────────────────────────────────────────
@@ -125,8 +126,7 @@ export function Sidebar() {
           if (adminOnly && !isAdmin)   return null;
           if (teamOnly  && !isTeamAdmin) return null;
 
-          const active = pathname === href || pathname.startsWith(href + '/') ||
-            (href === '/preferences' && pathname.startsWith('/settings/'));
+          const active = pathname === href || pathname.startsWith(href + '/');
           const showOverdueBadge = href === '/track' && overdueCount > 0;
 
           return (
@@ -162,18 +162,20 @@ export function Sidebar() {
               {!collapsed && active && subItems && (
                 <div className="mt-0.5 ml-3 flex flex-col gap-0.5 border-l border-border pl-3">
                   {subItems.map(({ href: subHref, label: subLabel }) => {
-                    const isPath    = subHref.startsWith('/');
-                    const subActive = isPath ? pathname === subHref : hash === subHref;
-                    const cls = cn(
-                      'flex items-center px-2 py-1.5 rounded-md text-xs transition-colors',
-                      subActive
-                        ? 'text-primary font-medium bg-primary/5'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                    );
-                    return isPath ? (
-                      <Link key={subHref} href={subHref} className={cls}>{subLabel}</Link>
-                    ) : (
-                      <a key={subHref} href={subHref} className={cls}>{subLabel}</a>
+                    const subActive = hash === subHref;
+                    return (
+                      <a
+                        key={subHref}
+                        href={subHref}
+                        className={cn(
+                          'flex items-center px-2 py-1.5 rounded-md text-xs transition-colors',
+                          subActive
+                            ? 'text-primary font-medium bg-primary/5'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                        )}
+                      >
+                        {subLabel}
+                      </a>
                     );
                   })}
                 </div>
