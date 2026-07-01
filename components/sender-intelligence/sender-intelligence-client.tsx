@@ -1170,23 +1170,22 @@ export function SenderIntelligenceClient({
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center max-w-sm px-4">
             <div className="flex justify-center mb-4">
-              <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
-                <Inbox className="w-8 h-8 text-muted-foreground" />
+              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+                <Sparkles className="w-8 h-8 text-primary" />
               </div>
             </div>
-            <h2 className="text-lg font-semibold mb-2">No inbox data yet</h2>
-            <p className="text-muted-foreground text-sm">
-              Tune analyzes your Gmail senders automatically once you run your first triage.
+            <h2 className="text-lg font-semibold mb-2">Ready to analyze your inbox</h2>
+            <p className="text-muted-foreground text-sm mb-6">
+              Tune will scan your last 30 days of email to identify senders you never open,
+              newsletters to bundle, and noise to clean up. Takes about 90 seconds.
             </p>
+            <Button onClick={() => handleRefresh()} disabled={isRefreshing}>
+              {isRefreshing
+                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Starting…</>
+                : 'Scan inbox'}
+            </Button>
             <p className="text-xs text-muted-foreground mt-4">
-              <a
-                href={`https://mail.google.com/mail/u/${gmailAcct}/`}
-                target="_blank"
-                rel="noopener"
-                className="text-primary underline-offset-2 hover:underline"
-              >
-                Open Gmail and run triage →
-              </a>
+              Your emails are never stored — only sender-level statistics.
             </p>
           </div>
         </div>
