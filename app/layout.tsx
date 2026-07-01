@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Inter } from "next/font/google";
+import Script from 'next/script';
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { HydrationWatchdog } from '@/components/hydration-watchdog';
@@ -35,7 +36,7 @@ export default function RootLayout({
         {children}
         <HydrationWatchdog />
         {/* If React never hydrated (e.g. a JS chunk returned 403), show a reload banner. */}
-        <script dangerouslySetInnerHTML={{ __html: `
+        <Script id="hydration-check" strategy="afterInteractive">{`
           setTimeout(function() {
             if (document.documentElement.getAttribute('data-hydrated') !== 'true' &&
                 document.querySelectorAll('button').length > 0) {
@@ -45,7 +46,7 @@ export default function RootLayout({
               document.body.appendChild(b);
             }
           }, 7000);
-        ` }} />
+        `}</Script>
       </body>
     </html>
   );
